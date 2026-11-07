@@ -57,6 +57,12 @@ class TunnelDetailTableViewController: NSViewController {
         return button
     }()
 
+    let settingsButton: NSPopUpButton = {
+        let button = NSPopUpButton(frame: .zero, pullsDown: true)
+        button.bezelStyle = .push
+        return button
+    }()
+
     let box: NSBox = {
         let box = NSBox()
         box.titlePosition = .noTitle
@@ -81,11 +87,14 @@ class TunnelDetailTableViewController: NSViewController {
     private var tunnelEditVC: TunnelEditViewController?
     private var reloadRuntimeConfigurationTask: Task<Void, Never>?
 
-    init(tunnelsManager: TunnelsManager, tunnel: TunnelContainer) {
+    init(tunnelsManager: TunnelsManager, tunnel: TunnelContainer, settingsMenu: NSMenu) {
         self.tunnelsManager = tunnelsManager
         self.tunnel = tunnel
         tunnelViewModel = TunnelViewModel(tunnelConfiguration: tunnel.tunnelConfiguration)
         super.init(nibName: nil, bundle: nil)
+        // A pull-down button shows its first item as its title.
+        settingsMenu.insertItem(NSMenuItem(title: tr("macButtonSettings"), action: nil, keyEquivalent: ""), at: 0)
+        settingsButton.menu = settingsMenu
         updateTableViewModelRowsBySection()
         updateTableViewModelRows()
         statusObservationToken = ObservationToken({ tunnel.status }) { [weak self] status in
@@ -123,9 +132,11 @@ class TunnelDetailTableViewController: NSViewController {
         containerView.addSubview(box)
         containerView.addSubview(scrollView)
         containerView.addSubview(editButton)
+        containerView.addSubview(settingsButton)
         box.translatesAutoresizingMaskIntoConstraints = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         editButton.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             containerView.topAnchor.constraint(equalTo: scrollView.topAnchor),
@@ -137,7 +148,9 @@ class TunnelDetailTableViewController: NSViewController {
             scrollView.bottomAnchor.constraint(equalTo: bottomControlsContainer.topAnchor),
             bottomControlsContainer.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
             editButton.trailingAnchor.constraint(equalTo: bottomControlsContainer.trailingAnchor),
-            bottomControlsContainer.bottomAnchor.constraint(equalTo: editButton.bottomAnchor, constant: 0)
+            bottomControlsContainer.bottomAnchor.constraint(equalTo: editButton.bottomAnchor, constant: 0),
+            settingsButton.trailingAnchor.constraint(equalTo: editButton.leadingAnchor, constant: -8),
+            settingsButton.centerYAnchor.constraint(equalTo: editButton.centerYAnchor)
         ])
 
         NSLayoutConstraint.activate([

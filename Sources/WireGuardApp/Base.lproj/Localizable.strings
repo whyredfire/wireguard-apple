@@ -365,6 +365,7 @@
 "macButtonDeleteTunnels (%d)" = "Delete %d tunnels";
 
 "macButtonEdit" = "Edit";
+"macButtonSettings" = "Settings";
 
 // Mac detail/edit view fields
 

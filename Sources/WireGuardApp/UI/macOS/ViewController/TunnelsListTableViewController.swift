@@ -25,49 +25,36 @@ class TunnelsListTableViewController: NSViewController {
         return tableView
     }()
 
-    let addButton: NSPopUpButton = {
-        let imageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        imageItem.image = NSImage(named: NSImage.addTemplateName)!
-
-        let menu = NSMenu()
-        menu.addItem(imageItem)
-        menu.addItem(withTitle: tr("macMenuAddEmptyTunnel"), action: #selector(handleAddEmptyTunnelAction), keyEquivalent: "n")
-        menu.addItem(withTitle: tr("macMenuImportTunnels"), action: #selector(handleImportTunnelAction), keyEquivalent: "o")
-        menu.autoenablesItems = false
-
-        let button = NSPopUpButton(frame: NSRect.zero, pullsDown: true)
-        button.menu = menu
-        button.bezelStyle = .smallSquare
-        (button.cell as? NSPopUpButtonCell)?.arrowPosition = .arrowAtBottom
-        return button
-    }()
+    let addButton = barPullDownButton(symbol: "plus", items: [
+        NSMenuItem(title: tr("macMenuAddEmptyTunnel"), action: #selector(handleAddEmptyTunnelAction), keyEquivalent: "n"),
+        NSMenuItem(title: tr("macMenuImportTunnels"), action: #selector(handleImportTunnelAction), keyEquivalent: "o")
+    ])
 
     let removeButton: NSButton = {
-        let image = NSImage(named: NSImage.removeTemplateName)!
-        let button = NSButton(image: image, target: nil, action: #selector(handleRemoveTunnelAction))
-        button.bezelStyle = .smallSquare
-        button.imagePosition = .imageOnly
+        let button = NSButton(image: barSymbol("minus"), target: nil, action: #selector(handleRemoveTunnelAction))
+        button.isBordered = false
         return button
     }()
 
-    let actionButton: NSPopUpButton = {
-        let imageItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        imageItem.image = NSImage(named: NSImage.actionTemplateName)!
+    private static func barSymbol(_ name: String) -> NSImage {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)!
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))!
+    }
 
+    private static func barPullDownButton(symbol: String, items: [NSMenuItem]) -> NSPopUpButton {
+        // A pull-down button shows its first item, so that one only carries the symbol.
+        let titleItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        titleItem.image = barSymbol(symbol)
         let menu = NSMenu()
-        menu.addItem(imageItem)
-        menu.addItem(withTitle: tr("macMenuViewLog"), action: #selector(handleViewLogAction), keyEquivalent: "")
-        menu.addItem(withTitle: tr("macMenuExportTunnels"), action: #selector(handleExportTunnelsAction), keyEquivalent: "")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: tr("macMenuLaunchAtLogin"), action: #selector(handleLaunchAtLoginAction), keyEquivalent: "")
+        menu.items = [titleItem] + items
         menu.autoenablesItems = false
 
-        let button = NSPopUpButton(frame: NSRect.zero, pullsDown: true)
+        let button = NSPopUpButton(frame: .zero, pullsDown: true)
         button.menu = menu
-        button.bezelStyle = .smallSquare
-        (button.cell as? NSPopUpButtonCell)?.arrowPosition = .arrowAtBottom
+        button.isBordered = false
+        (button.cell as? NSPopUpButtonCell)?.arrowPosition = .noArrow
         return button
-    }()
+    }
 
     init(tunnelsManager: TunnelsManager) {
         self.tunnelsManager = tunnelsManager
@@ -83,7 +70,6 @@ class TunnelsListTableViewController: NSViewController {
         tableView.delegate = self
 
         tableView.doubleAction = #selector(listDoubleClicked(sender:))
-        actionButton.menu?.delegate = self
 
         let isSelected = selectTunnelInOperation() || selectTunnel(at: 0)
         if !isSelected {
@@ -91,55 +77,60 @@ class TunnelsListTableViewController: NSViewController {
         }
         tableView.allowsEmptySelection = false
 
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.borderType = .bezelBorder
+        tableView.backgroundColor = .clear
 
+        let scrollView = NSScrollView()
         let clipView = NSClipView()
         clipView.documentView = tableView
-        scrollView.contentView = clipView
+        scrollView.contentView = clipView // Set contentView before setting drawsBackground
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
 
-        let buttonBar = NSStackView(views: [addButton, removeButton, actionButton])
-        buttonBar.orientation = .horizontal
-        buttonBar.spacing = -1
+        // Matches the box behind the tunnel details.
+        let box = NSBox()
+        box.titlePosition = .noTitle
+        box.fillColor = .unemphasizedSelectedContentBackgroundColor
 
-        NSLayoutConstraint.activate([
-            removeButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 26),
-            removeButton.topAnchor.constraint(equalTo: buttonBar.topAnchor),
-            removeButton.bottomAnchor.constraint(equalTo: buttonBar.bottomAnchor)
-        ])
+        let separator = NSBox()
+        separator.boxType = .separator
 
-        let fillerButton = FillerButton()
+        let buttonBar = NSStackView(views: [addButton, removeButton])
+        buttonBar.spacing = 2
+        for button in [addButton, removeButton] {
+            button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        }
 
         let containerView = NSView()
-        containerView.addSubview(scrollView)
-        containerView.addSubview(buttonBar)
-        containerView.addSubview(fillerButton)
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        buttonBar.translatesAutoresizingMaskIntoConstraints = false
-        fillerButton.translatesAutoresizingMaskIntoConstraints = false
+        for subview in [box, scrollView, separator, buttonBar] {
+            containerView.addSubview(subview)
+            subview.translatesAutoresizingMaskIntoConstraints = false
+        }
 
         NSLayoutConstraint.activate([
-            containerView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            containerView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            containerView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: buttonBar.topAnchor, constant: 1),
-            containerView.leadingAnchor.constraint(equalTo: buttonBar.leadingAnchor),
-            containerView.bottomAnchor.constraint(equalTo: buttonBar.bottomAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: fillerButton.topAnchor, constant: 1),
-            containerView.bottomAnchor.constraint(equalTo: fillerButton.bottomAnchor),
-            buttonBar.trailingAnchor.constraint(equalTo: fillerButton.leadingAnchor, constant: 1),
-            fillerButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
-        ])
+            box.topAnchor.constraint(equalTo: containerView.topAnchor),
+            box.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            box.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
 
-        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 6),
+            scrollView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: separator.topAnchor),
+
+            separator.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
+            separator.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
+            separator.bottomAnchor.constraint(equalTo: buttonBar.topAnchor, constant: -4),
+
+            buttonBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 6),
+            buttonBar.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -5),
+
             containerView.widthAnchor.constraint(equalToConstant: 180),
             containerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 120)
         ])
 
         addButton.menu?.items.forEach { $0.target = self }
-        actionButton.menu?.items.forEach { $0.target = self }
         removeButton.target = self
 
         view = containerView
@@ -206,6 +197,20 @@ class TunnelsListTableViewController: NSViewController {
     @objc func handleViewLogAction() {
         let logVC = LogViewController(tunnelsManager: tunnelsManager)
         self.presentAsSheet(logVC)
+    }
+
+    /// The app-wide actions, shown next to the tunnel details' Edit button.
+    func makeSettingsMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.items = [
+            NSMenuItem(title: tr("macMenuViewLog"), action: #selector(handleViewLogAction), keyEquivalent: ""),
+            NSMenuItem(title: tr("macMenuExportTunnels"), action: #selector(handleExportTunnelsAction), keyEquivalent: ""),
+            .separator(),
+            NSMenuItem(title: tr("macMenuLaunchAtLogin"), action: #selector(handleLaunchAtLoginAction), keyEquivalent: "")
+        ]
+        menu.items.forEach { $0.target = self }
+        menu.delegate = self
+        return menu
     }
 
     @objc func handleLaunchAtLoginAction() {
@@ -338,26 +343,6 @@ extension TunnelsListTableViewController: NSMenuItemValidation {
             return !tableView.selectedRowIndexes.isEmpty
         }
         return true
-    }
-}
-
-class FillerButton: NSButton {
-    override var intrinsicContentSize: NSSize {
-        return NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
-    }
-
-    init() {
-        super.init(frame: CGRect.zero)
-        title = ""
-        bezelStyle = .smallSquare
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        // Eat mouseDown event, so that the button looks enabled but is unresponsive
     }
 }
 
