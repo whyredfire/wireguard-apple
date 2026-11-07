@@ -168,9 +168,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
-        self?.showManageTunnelsWindow(completion: nil)
-        return true
+    func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        guard !hasVisibleWindows else { return true }
+        showManageTunnelsWindow(completion: nil)
+        return false
     }
 
     private func setDockIconAndMainMenuVisibility(isVisible: Bool, completion: (() -> Void)? = nil) {
