@@ -749,6 +749,18 @@ extension NETunnelProviderManager {
     }
 
     func isEquivalentTo(_ tunnel: TunnelContainer) -> Bool {
-        return localizedDescription == tunnel.name
+        guard localizedDescription == tunnel.name else { return false }
+        #if os(macOS)
+        // The list also holds other users' tunnels, which may share a name.
+        return ownerUID == tunnel.tunnelProvider.ownerUID
+        #else
+        return true
+        #endif
     }
+
+    #if os(macOS)
+    fileprivate var ownerUID: uid_t? {
+        return (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration?["UID"] as? uid_t
+    }
+    #endif
 }
