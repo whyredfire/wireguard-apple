@@ -3,7 +3,7 @@
 
 import NetworkExtension
 
-enum PacketTunnelProviderError: String, Error {
+package enum PacketTunnelProviderError: String, Error {
     case savedProtocolConfigurationIsInvalid
     case dnsResolutionFailure
     case couldNotStartBackend
@@ -16,7 +16,7 @@ extension NETunnelProviderProtocol {
 
     /// When enabled, the tunnel's DNS servers are used only for the tunnel's
     /// DNS search domains rather than for all queries on the system.
-    var isSplitDNSEnabled: Bool {
+    package var isSplitDNSEnabled: Bool {
         get {
             return providerConfiguration?[Self.splitDNSKey] as? Bool ?? false
         }
@@ -27,7 +27,7 @@ extension NETunnelProviderProtocol {
         }
     }
 
-    convenience init?(tunnelConfiguration: TunnelConfiguration, previouslyFrom old: NEVPNProtocol? = nil) {
+    package convenience init?(tunnelConfiguration: TunnelConfiguration, previouslyFrom old: NEVPNProtocol? = nil) {
         self.init()
 
         guard let name = tunnelConfiguration.name else { return nil }
@@ -54,7 +54,7 @@ extension NETunnelProviderProtocol {
         }
     }
 
-    func asTunnelConfiguration(called name: String? = nil) -> TunnelConfiguration? {
+    package func asTunnelConfiguration(called name: String? = nil) -> TunnelConfiguration? {
         if let passwordReference = passwordReference,
             let config = Keychain.openReference(called: passwordReference) {
             return try? TunnelConfiguration(fromWgQuickConfig: config, called: name)
@@ -65,18 +65,18 @@ extension NETunnelProviderProtocol {
         return nil
     }
 
-    func destroyConfigurationReference() {
+    package func destroyConfigurationReference() {
         guard let ref = passwordReference else { return }
         Keychain.deleteReference(called: ref)
     }
 
-    func verifyConfigurationReference() -> Bool {
+    package func verifyConfigurationReference() -> Bool {
         guard let ref = passwordReference else { return false }
         return Keychain.verifyReference(called: ref)
     }
 
     @discardableResult
-    func migrateConfigurationIfNeeded(called name: String) -> Bool {
+    package func migrateConfigurationIfNeeded(called name: String) -> Bool {
         /* This is how we did things before we switched to putting items
          * in the keychain. But it's still useful to keep the migration
          * around so that .mobileconfig files are easier.

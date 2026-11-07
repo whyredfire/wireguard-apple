@@ -2,6 +2,7 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Cocoa
+import Highlighter
 
 protocol ConfTextColorTheme {
     static var defaultColor: NSColor { get }

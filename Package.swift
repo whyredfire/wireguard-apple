@@ -22,6 +22,12 @@ let wireGuardKitAdapterSources = [
     "WireGuardAdapter.swift"
 ]
 
+// Copied into the app bundle by scripts/build.sh.
+let appLocalizations = [
+    "Base", "ca", "de", "es", "fa", "fi", "fr", "id", "it", "ja",
+    "ko", "pa", "pl", "ro", "ru", "sl", "tr", "zh-Hans", "zh-Hant"
+]
+
 let package = Package(
     name: "WireGuardKit",
     platforms: [
@@ -29,12 +35,16 @@ let package = Package(
         .iOS(.v15)
     ],
     products: [
-        .library(name: "WireGuardKit", targets: ["WireGuardKit"])
+        .library(name: "WireGuardKit", targets: ["WireGuardKit"]),
+        .executable(name: "WireGuard", targets: ["WireGuard"]),
+        .executable(name: "WireGuardNetworkExtension", targets: ["WireGuardNetworkExtension"]),
+        .executable(name: "WireGuardLoginItemHelper", targets: ["WireGuardLoginItemHelper"])
     ],
     dependencies: [],
     targets: [
-        // Tunnel configuration model: no dependency on wireguard-go, so the
-        // app can use it without linking the Go runtime.
+        // MARK: WireGuardKit
+
+        // The configuration model, without wireguard-go, for the app.
         .target(
             name: "WireGuardKitCore",
             dependencies: ["WireGuardKitC"],
@@ -42,7 +52,6 @@ let package = Package(
             exclude: wireGuardKitAdapterSources,
             sources: wireGuardKitCoreSources
         ),
-        // The tunnel adapter driving wireguard-go. Re-exports WireGuardKitCore.
         .target(
             name: "WireGuardKit",
             dependencies: ["WireGuardKitCore", "WireGuardKitGo", "WireGuardKitC"],
@@ -55,6 +64,7 @@ let package = Package(
             dependencies: [],
             publicHeadersPath: "."
         ),
+        // libwg-go.a is built by the Makefile; see scripts/build.sh.
         .target(
             name: "WireGuardKitGo",
             dependencies: [],
@@ -67,6 +77,62 @@ let package = Package(
             ],
             publicHeadersPath: ".",
             linkerSettings: [.linkedLibrary("wg-go")]
+        ),
+
+        // MARK: macOS app
+
+        .target(
+            name: "WireGuardShared",
+            dependencies: ["WireGuardKitCore", "RingLogger"],
+            path: "Sources/Shared"
+        ),
+        .target(
+            name: "RingLogger",
+            exclude: ["test_ringlogger.c"],
+            publicHeadersPath: "."
+        ),
+        .target(
+            name: "Highlighter",
+            publicHeadersPath: "."
+        ),
+        .target(
+            name: "Minizip",
+            exclude: ["MiniZip64_info.txt"],
+            publicHeadersPath: ".",
+            linkerSettings: [.linkedLibrary("z")]
+        ),
+        .systemLibrary(name: "LibProc"),
+        .executableTarget(
+            name: "WireGuard",
+            dependencies: ["WireGuardKitCore", "WireGuardShared", "RingLogger", "Highlighter", "Minizip", "LibProc"],
+            path: "Sources/WireGuardApp",
+            exclude: appLocalizations.map { "\($0).lproj" } + [
+                "Config",
+                "Resources",
+                "UI/iOS",
+                "UI/macOS/Resources",
+                "UI/macOS/Info.plist",
+                "UI/macOS/WireGuard.entitlements",
+                "WireGuard-Bridging-Header.h"
+            ]
+        ),
+        .executableTarget(
+            name: "WireGuardNetworkExtension",
+            dependencies: ["WireGuardKit", "WireGuardShared"],
+            path: "Sources/WireGuardNetworkExtension",
+            exclude: [
+                "Info.plist",
+                "WireGuardNetworkExtension_iOS.entitlements",
+                "WireGuardNetworkExtension_macOS.entitlements",
+                "WireGuardNetworkExtension-Bridging-Header.h"
+            ]
+        ),
+        .executableTarget(
+            name: "WireGuardLoginItemHelper",
+            exclude: [
+                "Info.plist",
+                "LoginItemHelper.entitlements"
+            ]
         )
     ]
 )

@@ -2,6 +2,7 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Foundation
+import Minizip
 
 enum ZipArchiveError: WireGuardAppError {
     case cantOpenInputZipFile

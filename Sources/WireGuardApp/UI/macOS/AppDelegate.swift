@@ -216,9 +216,10 @@ extension AppDelegate {
         if let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
             appVersion += " (\(appBuild))"
         }
+        let goBackendVersion = Bundle.main.infoDictionary?["WireGuardGoVersion"] as? String ?? "Unknown"
         let appVersionString = [
             tr(format: "macAppVersion (%@)", appVersion),
-            tr(format: "macGoBackendVersion (%@)", WIREGUARD_GO_VERSION)
+            tr(format: "macGoBackendVersion (%@)", goBackendVersion)
         ].joined(separator: "\n")
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [

@@ -4,17 +4,17 @@
 import Foundation
 import os.log
 
-public class Logger {
-    enum LoggerError: Error {
+package class Logger {
+    package enum LoggerError: Error {
         case openFailure
     }
 
-    static var global: Logger?
+    package static var global: Logger?
 
-    var log: OpaquePointer
-    var tag: String
+    package var log: OpaquePointer
+    package var tag: String
 
-    init(tagged tag: String, withFilePath filePath: String) throws {
+    package init(tagged tag: String, withFilePath filePath: String) throws {
         guard let log = open_log(filePath) else { throw LoggerError.openFailure }
         self.log = log
         self.tag = tag
@@ -24,15 +24,15 @@ public class Logger {
         close_log(self.log)
     }
 
-    func log(message: String) {
+    package func log(message: String) {
         write_msg_to_log(log, tag, message.trimmingCharacters(in: .newlines))
     }
 
-    func writeLog(to targetFile: String) -> Bool {
+    package func writeLog(to targetFile: String) -> Bool {
         return write_log_to_file(targetFile, self.log) == 0
     }
 
-    static func configureGlobal(tagged tag: String, withFilePath filePath: String?) {
+    package static func configureGlobal(tagged tag: String, withFilePath filePath: String?) {
         if Logger.global != nil {
             return
         }
@@ -54,12 +54,12 @@ public class Logger {
     }
 }
 
-func wg_log(_ type: OSLogType, staticMessage msg: StaticString) {
+package func wg_log(_ type: OSLogType, staticMessage msg: StaticString) {
     os_log(msg, log: OSLog.default, type: type)
     Logger.global?.log(message: "\(msg)")
 }
 
-func wg_log(_ type: OSLogType, message msg: String) {
+package func wg_log(_ type: OSLogType, message msg: String) {
     os_log("%{public}s", log: OSLog.default, type: type, msg)
     Logger.global?.log(message: msg)
 }

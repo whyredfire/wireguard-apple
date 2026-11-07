@@ -11,13 +11,13 @@ class StatusItemController {
     }
 
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let statusBarImageWhenActive = NSImage(named: "StatusBarIcon")!
-    private let statusBarImageWhenInactive = NSImage(named: "StatusBarIconDimmed")!
+    private let statusBarImageWhenActive = NSImage(named: "StatusBarIconTemplate")!
+    private let statusBarImageWhenInactive = NSImage(named: "StatusBarIconDimmedTemplate")!
 
     private let animationImages = [
-        NSImage(named: "StatusBarIconDot1")!,
-        NSImage(named: "StatusBarIconDot2")!,
-        NSImage(named: "StatusBarIconDot3")!
+        NSImage(named: "StatusBarIconDot1Template")!,
+        NSImage(named: "StatusBarIconDot2Template")!,
+        NSImage(named: "StatusBarIconDot3Template")!
     ]
     private var animationImageIndex: Int = 0
     private var animationTimer: Timer?

@@ -1,0 +1,4 @@
+module LibProc [system] {
+    header "shim.h"
+    export *
+}
