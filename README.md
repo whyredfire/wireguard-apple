@@ -1,26 +1,23 @@
 # [WireGuard](https://www.wireguard.com/) for macOS
 
-This project contains the WireGuard app for macOS and WireGuardKit, the library it is built on. The
-sources of the iOS app are kept, but it is not built.
+The WireGuard app for macOS, and WireGuardKit, the library it is built on.
+
+Tunnels run in a helper that the app installs as a LaunchDaemon on first launch, after asking for an
+administrator password. It creates the tunnel interfaces, runs wireguard-go on them and sets up their
+routes and DNS, using network code from [Tailscale](https://github.com/tailscale/tailscale). Tunnels
+stop when the app quits.
 
 ## Building
 
-The app builds with SwiftPM and the Xcode Command Line Tools. Go is needed for wireguard-go:
+The app builds with SwiftPM and the Xcode Command Line Tools, plus Go for the helper:
 
 ```
 $ brew install go
 $ scripts/build.sh
 ```
 
-This produces `build/WireGuard.app`, ad-hoc signed. It launches, but can't start tunnels: the
-network extension entitlement requires a provisioning profile. For a working build, register an
-App ID for the app and one for its `.network-extension` with the Network Extensions capability,
-create a development provisioning profile for each, and pass them with your signing identity:
-
-```
-$ SIGN_IDENTITY="Apple Development: …" TEAM_ID=… APP_ID=… \
-    APP_PROFILE=app.provisionprofile EXTENSION_PROFILE=extension.provisionprofile scripts/build.sh
-```
+This produces an ad-hoc signed `build/WireGuard.app`. Set `SIGN_IDENTITY` to sign it with a
+certificate instead.
 
 ## WireGuardKit integration
 
