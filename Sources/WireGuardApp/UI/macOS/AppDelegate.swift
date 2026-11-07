@@ -255,6 +255,12 @@ extension AppDelegate: StatusMenuWindowDelegate {
 @discardableResult
 func registerLoginItem(shouldLaunchAtLogin: Bool) -> Bool {
     let appId = Bundle.main.bundleIdentifier!
-    let helperBundleId = "\(appId).login-item-helper"
-    return SMLoginItemSetEnabled(helperBundleId as CFString, shouldLaunchAtLogin)
+    let helper = SMAppService.loginItem(identifier: "\(appId).login-item-helper")
+    do {
+        try shouldLaunchAtLogin ? helper.register() : helper.unregister()
+        return true
+    } catch {
+        wg_log(.error, message: "Unable to \(shouldLaunchAtLogin ? "register" : "unregister") the login item: \(error)")
+        return false
+    }
 }
