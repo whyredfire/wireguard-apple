@@ -53,6 +53,7 @@ class TunnelsManager {
             do {
                 try await manager.connectHelper(canInstall: true)
                 completionHandler(.success(manager))
+                manager.restoreActiveTunnels()
             } catch {
                 completionHandler(.failure(.helperUnavailable(systemError: error)))
             }
@@ -126,6 +127,9 @@ class TunnelsManager {
             tunnel.isSplitDNSEnabled = oldSplitDNS
             completionHandler(.systemErrorOnModifyTunnel(systemError: error))
             return
+        }
+        if activeTunnelNames.remove(oldName) != nil {
+            activeTunnelNames.insert(tunnelName)
         }
 
         if tunnelName != oldName {
@@ -207,6 +211,7 @@ class TunnelsManager {
             return
         }
         tunnel.status = .activating
+        activeTunnelNames.insert(tunnel.name)
         let config = HelperTunnelConfig(configuration, name: tunnel.name, isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
         Task {
             do {
@@ -225,6 +230,7 @@ class TunnelsManager {
     }
 
     func startDeactivation(of tunnel: TunnelContainer) {
+        activeTunnelNames.remove(tunnel.name)
         guard tunnel.status != .inactive && tunnel.status != .deactivating else { return }
         tunnel.status = .deactivating
         Task {
@@ -238,6 +244,19 @@ class TunnelsManager {
         guard let response = try? await helper?.request("log", cursor: cursor) else { return ([], cursor) }
         let entries = (response.log ?? []).map { LogViewHelper.LogEntry(timestamp: $0.time, message: "[HELPER] " + $0.message) }
         return (entries, response.cursor ?? cursor)
+    }
+
+    /// The tunnels that were turned on, so they come back when the app or the helper restarts.
+    private var activeTunnelNames: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: "ActiveTunnels") ?? []) }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: "ActiveTunnels") }
+    }
+
+    private func restoreActiveTunnels() {
+        let names = activeTunnelNames
+        for tunnel in tunnels where names.contains(tunnel.name) && tunnel.status == .inactive {
+            startActivation(of: tunnel)
+        }
     }
 
     private func save() throws {
@@ -255,8 +274,8 @@ class TunnelsManager {
         }
     }
 
-    /// The helper stops the tunnels of a lost connection, so mark them
-    /// inactive and reconnect, e.g. after launchd restarted the helper.
+    /// The helper stops the tunnels of a lost connection, so mark them inactive,
+    /// reconnect, e.g. after launchd restarted the helper, and start them again.
     private func helperDisconnected() async {
         guard !isReconnecting else { return }
         isReconnecting = true
@@ -265,7 +284,10 @@ class TunnelsManager {
         helper = nil
         tunnels.forEach { $0.status = .inactive }
         for _ in 0..<10 {
-            if (try? await connectHelper(canInstall: false)) != nil { return }
+            if (try? await connectHelper(canInstall: false)) != nil {
+                restoreActiveTunnels()
+                return
+            }
             try? await Task.sleep(for: .seconds(1))
         }
         wg_log(.error, staticMessage: "Unable to reconnect to the helper")
