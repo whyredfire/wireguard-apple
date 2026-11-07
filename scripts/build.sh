@@ -26,6 +26,10 @@ sed -e "s/\$(APP_ID_MACOS)/$APP_ID/g" -e "s/\$(VERSION_ID)/$BUILD/g" -e "s/\$(WI
     Sources/WireGuardApp/UI/macOS/Info.plist > "$APP/Contents/Info.plist"
 cp "$BIN/WireGuard" "$APP/Contents/MacOS/"
 cp -R Sources/WireGuardApp/UI/macOS/Resources/ Sources/WireGuardApp/*.lproj "$APP/Contents/Resources/"
+for license in "WireGuard:COPYING" "Tailscale:Sources/WireGuardHelper/internal/tailscale/LICENSE" \
+    "wireguard-go:Sources/WireGuardHelper/internal/bind/LICENSE"; do
+    printf '%s\n\n%s\n\n\n' "${license%%:*}" "$(cat "${license#*:}")"
+done > "$APP/Contents/Resources/Acknowledgements.txt"
 
 # Sign inside-out: the helper, then the app.
 codesign --force --options runtime --sign "$SIGN_IDENTITY" --identifier "$HELPER_LABEL" "$HELPER"
