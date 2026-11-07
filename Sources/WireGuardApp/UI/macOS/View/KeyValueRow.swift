@@ -50,8 +50,6 @@ class EditableKeyValueRow: NSView {
     }
 
     var statusObservationToken: AnyObject?
-    var isOnDemandEnabledObservationToken: AnyObject?
-    var hasOnDemandRulesObservationToken: AnyObject?
 
     override var intrinsicContentSize: NSSize {
         let height = max(keyLabel.intrinsicContentSize.height, valueLabel.intrinsicContentSize.height)
@@ -111,8 +109,6 @@ class EditableKeyValueRow: NSView {
         value = ""
         isKeyInBold = false
         statusObservationToken = nil
-        isOnDemandEnabledObservationToken = nil
-        hasOnDemandRulesObservationToken = nil
     }
 }
 

@@ -81,18 +81,9 @@ extension ManageTunnelsRootViewController: TunnelsListTableViewControllerDelegat
         assert(!tunnelIndices.isEmpty)
         if tunnelIndices.count == 1 {
             let tunnel = tunnelsManager.tunnel(at: tunnelIndices.first!)
-            if tunnel.isTunnelAvailableToUser {
-                let tunnelDetailVC = TunnelDetailTableViewController(tunnelsManager: tunnelsManager, tunnel: tunnel)
-                setTunnelDetailContentVC(tunnelDetailVC)
-                self.tunnelDetailVC = tunnelDetailVC
-            } else {
-                let unusableTunnelDetailVC = tunnelDetailContentVC as? UnusableTunnelDetailViewController ?? UnusableTunnelDetailViewController()
-                unusableTunnelDetailVC.onButtonClicked = { [weak tunnelsListVC] in
-                    tunnelsListVC?.handleRemoveTunnelAction()
-                }
-                setTunnelDetailContentVC(unusableTunnelDetailVC)
-                self.tunnelDetailVC = nil
-            }
+            let tunnelDetailVC = TunnelDetailTableViewController(tunnelsManager: tunnelsManager, tunnel: tunnel)
+            setTunnelDetailContentVC(tunnelDetailVC)
+            self.tunnelDetailVC = tunnelDetailVC
         } else if tunnelIndices.count > 1 {
             let multiSelectionVC = tunnelDetailContentVC as? ButtonedDetailViewController ?? ButtonedDetailViewController()
             multiSelectionVC.setButtonTitle(tr(format: "macButtonDeleteTunnels (%d)", tunnelIndices.count))

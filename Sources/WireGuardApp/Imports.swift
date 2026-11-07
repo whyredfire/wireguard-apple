@@ -2,4 +2,4 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 @_exported import WireGuardKitCore
-@_exported import WireGuardShared
+@_exported import RingLogger

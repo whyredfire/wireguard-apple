@@ -5,13 +5,13 @@ import Foundation
 
 extension TunnelConfiguration {
 
-    package enum ParserState {
+    enum ParserState {
         case inInterfaceSection
         case inPeerSection
         case notInASection
     }
 
-    package enum ParseError: Error {
+    enum ParseError: Error {
         case invalidLine(String.SubSequence)
         case noInterface
         case multipleInterfaces
@@ -35,7 +35,7 @@ extension TunnelConfiguration {
         case multipleEntriesForKey(String)
     }
 
-    package convenience init(fromWgQuickConfig wgQuickConfig: String, called name: String? = nil) throws {
+    convenience init(fromWgQuickConfig wgQuickConfig: String, called name: String? = nil) throws {
         var interfaceConfiguration: InterfaceConfiguration?
         var peerConfigurations = [PeerConfiguration]()
 
@@ -123,7 +123,7 @@ extension TunnelConfiguration {
         }
     }
 
-    package func asWgQuickConfig() -> String {
+    func asWgQuickConfig() -> String {
         var output = "[Interface]\n"
         output.append("PrivateKey = \(interface.privateKey.base64Key)\n")
         if let listenPort = interface.listenPort {

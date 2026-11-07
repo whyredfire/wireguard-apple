@@ -3,6 +3,7 @@
 
 import Cocoa
 
+@MainActor
 class StatusItemController {
     var tunnelsInOperation: [TunnelContainer] = [] {
         didSet {

@@ -8,6 +8,7 @@ import Cocoa
 //   - Status item controller
 //   - Tunnels list view controller in the Manage Tunnels window
 
+@MainActor
 class TunnelsTracker {
 
     weak var statusMenu: StatusMenu? {
@@ -92,18 +93,6 @@ extension TunnelsTracker: TunnelsManagerListDelegate {
 }
 
 extension TunnelsTracker: TunnelsManagerActivationDelegate {
-    func tunnelActivationAttemptFailed(tunnel: TunnelContainer, error: TunnelsManagerActivationAttemptError) {
-        if let manageTunnelsRootVC = manageTunnelsRootVC, manageTunnelsRootVC.view.window?.isVisible ?? false {
-            ErrorPresenter.showErrorAlert(error: error, from: manageTunnelsRootVC)
-        } else {
-            ErrorPresenter.showErrorAlert(error: error, from: nil)
-        }
-    }
-
-    func tunnelActivationAttemptSucceeded(tunnel: TunnelContainer) {
-        // Nothing to do
-    }
-
     func tunnelActivationFailed(tunnel: TunnelContainer, error: TunnelsManagerActivationError) {
         if let manageTunnelsRootVC = manageTunnelsRootVC, manageTunnelsRootVC.view.window?.isVisible ?? false {
             ErrorPresenter.showErrorAlert(error: error, from: manageTunnelsRootVC)

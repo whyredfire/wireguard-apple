@@ -5,7 +5,7 @@ import Foundation
 
 extension String {
 
-    package func splitToArray(separator: Character = ",", trimmingCharacters: CharacterSet? = nil) -> [String] {
+    func splitToArray(separator: Character = ",", trimmingCharacters: CharacterSet? = nil) -> [String] {
         return split(separator: separator)
             .map {
                 if let charSet = trimmingCharacters {
@@ -20,7 +20,7 @@ extension String {
 
 extension Optional where Wrapped == String {
 
-    package func splitToArray(separator: Character = ",", trimmingCharacters: CharacterSet? = nil) -> [String] {
+    func splitToArray(separator: Character = ",", trimmingCharacters: CharacterSet? = nil) -> [String] {
         switch self {
         case .none:
             return []

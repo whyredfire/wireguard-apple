@@ -9,11 +9,11 @@ import Foundation
 /// Wraps the observer token received from
 /// `NotificationCenter.addObserver(forName:object:queue:using:)`
 /// and unregisters it in deinit.
-package final class NotificationToken {
-    package let notificationCenter: NotificationCenter
-    package let token: Any
+final class NotificationToken {
+    let notificationCenter: NotificationCenter
+    let token: Any
 
-    package init(notificationCenter: NotificationCenter = .default, token: Any) {
+    init(notificationCenter: NotificationCenter = .default, token: Any) {
         self.notificationCenter = notificationCenter
         self.token = token
     }
@@ -26,7 +26,7 @@ package final class NotificationToken {
 extension NotificationCenter {
     /// Convenience wrapper for addObserver(forName:object:queue:using:)
     /// that returns our custom `NotificationToken`.
-    package func observe(name: NSNotification.Name?, object obj: Any?, queue: OperationQueue?, using block: @escaping (Notification) -> Void) -> NotificationToken {
+    func observe(name: NSNotification.Name?, object obj: Any?, queue: OperationQueue?, using block: @escaping (Notification) -> Void) -> NotificationToken {
         let token = addObserver(forName: name, object: obj, queue: queue, using: block)
         return NotificationToken(notificationCenter: self, token: token)
     }

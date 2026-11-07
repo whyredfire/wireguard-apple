@@ -42,8 +42,6 @@ class TunnelEditViewController: NSViewController {
         return textView
     }()
 
-    let onDemandControlsRow = OnDemandControlsRow()
-
     let scrollView: NSScrollView = {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -89,7 +87,6 @@ class TunnelEditViewController: NSViewController {
 
     let tunnelsManager: TunnelsManager
     let tunnel: TunnelContainer?
-    var onDemandViewModel: ActivateOnDemandViewModel
 
     weak var delegate: TunnelEditViewControllerDelegate?
 
@@ -102,7 +99,6 @@ class TunnelEditViewController: NSViewController {
     init(tunnelsManager: TunnelsManager, tunnel: TunnelContainer?) {
         self.tunnelsManager = tunnelsManager
         self.tunnel = tunnel
-        self.onDemandViewModel = tunnel != nil ? ActivateOnDemandViewModel(tunnel: tunnel!) : ActivateOnDemandViewModel()
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -161,12 +157,11 @@ class TunnelEditViewController: NSViewController {
         excludePrivateIPsCheckbox.target = self
         excludePrivateIPsCheckbox.action = #selector(excludePrivateIPsCheckboxToggled(sender:))
 
-        onDemandControlsRow.onDemandViewModel = onDemandViewModel
 
         let margin: CGFloat = 20
         let internalSpacing: CGFloat = 10
 
-        let editorStackView = NSStackView(views: [nameRow, publicKeyRow, onDemandControlsRow, scrollView])
+        let editorStackView = NSStackView(views: [nameRow, publicKeyRow, scrollView])
         editorStackView.orientation = .vertical
         editorStackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         editorStackView.spacing = internalSpacing
@@ -197,7 +192,6 @@ class TunnelEditViewController: NSViewController {
         view.window?.ignoresMouseEvents = !enabled
         nameRow.valueLabel.isEditable = enabled
         textView.isEditable = enabled
-        onDemandControlsRow.onDemandSSIDsField.isEnabled = enabled
     }
 
     @objc func handleSaveAction() {
@@ -207,8 +201,6 @@ class TunnelEditViewController: NSViewController {
             return
         }
 
-        onDemandControlsRow.saveToViewModel()
-        let onDemandOption = onDemandViewModel.toOnDemandOption()
 
         let isTunnelModifiedWithoutChangingName = (tunnel != nil && tunnel!.name == name)
         guard isTunnelModifiedWithoutChangingName || tunnelsManager.tunnel(named: name) == nil else {
@@ -250,7 +242,7 @@ class TunnelEditViewController: NSViewController {
 
         if let tunnel = tunnel {
             // We're modifying an existing tunnel
-            tunnelsManager.modify(tunnel: tunnel, tunnelConfiguration: tunnelConfiguration, onDemandOption: onDemandOption, isSplitDNSEnabled: isSplitDNSEnabled) { [weak self] error in
+            tunnelsManager.modify(tunnel: tunnel, tunnelConfiguration: tunnelConfiguration, isSplitDNSEnabled: isSplitDNSEnabled) { [weak self] error in
                 guard let self = self else { return }
                 self.setUserInteractionEnabled(true)
                 if let error = error {
@@ -262,7 +254,7 @@ class TunnelEditViewController: NSViewController {
             }
         } else {
             // We're creating a new tunnel
-            self.tunnelsManager.add(tunnelConfiguration: tunnelConfiguration, onDemandOption: onDemandOption, isSplitDNSEnabled: isSplitDNSEnabled) { [weak self] result in
+            self.tunnelsManager.add(tunnelConfiguration: tunnelConfiguration, isSplitDNSEnabled: isSplitDNSEnabled) { [weak self] result in
                 guard let self = self else { return }
                 self.setUserInteractionEnabled(true)
                 switch result {

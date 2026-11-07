@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -31,14 +31,12 @@ let appLocalizations = [
 let package = Package(
     name: "WireGuardKit",
     platforms: [
-        .macOS(.v13),
-        .iOS(.v15)
+        .macOS(.v26),
+        .iOS(.v26)
     ],
     products: [
         .library(name: "WireGuardKit", targets: ["WireGuardKit"]),
-        .executable(name: "WireGuard", targets: ["WireGuard"]),
-        .executable(name: "WireGuardNetworkExtension", targets: ["WireGuardNetworkExtension"]),
-        .executable(name: "WireGuardLoginItemHelper", targets: ["WireGuardLoginItemHelper"])
+        .executable(name: "WireGuard", targets: ["WireGuard"])
     ],
     dependencies: [],
     targets: [
@@ -64,7 +62,7 @@ let package = Package(
             dependencies: [],
             publicHeadersPath: "."
         ),
-        // libwg-go.a is built by the Makefile; see scripts/build.sh.
+        // libwg-go.a is built by the Makefile.
         .target(
             name: "WireGuardKitGo",
             dependencies: [],
@@ -82,11 +80,6 @@ let package = Package(
         // MARK: macOS app
 
         .target(
-            name: "WireGuardShared",
-            dependencies: ["WireGuardKitCore", "RingLogger"],
-            path: "Sources/Shared"
-        ),
-        .target(
             name: "RingLogger",
             exclude: ["test_ringlogger.c"],
             publicHeadersPath: "."
@@ -101,32 +94,15 @@ let package = Package(
             publicHeadersPath: ".",
             linkerSettings: [.linkedLibrary("z")]
         ),
-        .systemLibrary(name: "LibProc"),
         .executableTarget(
             name: "WireGuard",
-            dependencies: ["WireGuardKitCore", "WireGuardShared", "RingLogger", "Highlighter", "Minizip", "LibProc"],
+            dependencies: ["WireGuardKitCore", "RingLogger", "Highlighter", "Minizip"],
             path: "Sources/WireGuardApp",
             exclude: appLocalizations.map { "\($0).lproj" } + [
                 "UI/macOS/Resources",
-                "UI/macOS/Info.plist",
-                "UI/macOS/WireGuard.entitlements"
-            ]
-        ),
-        .executableTarget(
-            name: "WireGuardNetworkExtension",
-            dependencies: ["WireGuardKit", "WireGuardShared"],
-            path: "Sources/WireGuardNetworkExtension",
-            exclude: [
-                "Info.plist",
-                "WireGuardNetworkExtension_macOS.entitlements"
-            ]
-        ),
-        .executableTarget(
-            name: "WireGuardLoginItemHelper",
-            exclude: [
-                "Info.plist",
-                "LoginItemHelper.entitlements"
+                "UI/macOS/Info.plist"
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

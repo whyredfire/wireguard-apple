@@ -25,7 +25,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(VERSION_ID)</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
@@ -34,8 +34,6 @@
 	<string>WireGuard.Application</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
-	<key>com.wireguard.macos.app_group_id</key>
-	<string>$(DEVELOPMENT_TEAM).group.$(APP_ID_MACOS)</string>
 	<key>WireGuardGoVersion</key>
 	<string>$(WIREGUARD_GO_VERSION)</string>
 </dict>

@@ -8,16 +8,12 @@ class TunnelDetailTableViewController: NSViewController {
     private enum TableViewModelRow {
         case interfaceFieldRow(TunnelViewModel.InterfaceField)
         case peerFieldRow(peer: TunnelViewModel.PeerData, field: TunnelViewModel.PeerField)
-        case onDemandRow
-        case onDemandSSIDRow
         case spacerRow
 
         func localizedSectionKeyString() -> String {
             switch self {
             case .interfaceFieldRow: return tr("tunnelSectionTitleInterface")
             case .peerFieldRow: return tr("tunnelSectionTitlePeer")
-            case .onDemandRow: return tr("macFieldOnDemand")
-            case .onDemandSSIDRow: return ""
             case .spacerRow: return ""
             }
         }
@@ -26,8 +22,6 @@ class TunnelDetailTableViewController: NSViewController {
             switch self {
             case .interfaceFieldRow(let field): return field == .name
             case .peerFieldRow(_, let field): return field == .publicKey
-            case .onDemandRow: return true
-            case .onDemandSSIDRow: return false
             case .spacerRow: return false
             }
         }
@@ -42,10 +36,6 @@ class TunnelDetailTableViewController: NSViewController {
         .publicKey, .preSharedKey, .endpoint,
         .allowedIPs, .persistentKeepAlive,
         .rxBytes, .txBytes, .lastHandshakeTime
-    ]
-
-    static let onDemandFields: [ActivateOnDemandViewModel.OnDemandField] = [
-        .onDemand, .ssid
     ]
 
     let tableView: NSTableView = {
@@ -84,8 +74,6 @@ class TunnelDetailTableViewController: NSViewController {
         }
     }
 
-    var onDemandViewModel: ActivateOnDemandViewModel
-
     private var tableViewModelRowsBySection = [[(isVisible: Bool, modelRow: TableViewModelRow)]]()
     private var tableViewModelRows = [TableViewModelRow]()
 
@@ -97,7 +85,6 @@ class TunnelDetailTableViewController: NSViewController {
         self.tunnelsManager = tunnelsManager
         self.tunnel = tunnel
         tunnelViewModel = TunnelViewModel(tunnelConfiguration: tunnel.tunnelConfiguration)
-        onDemandViewModel = ActivateOnDemandViewModel(tunnel: tunnel)
         super.init(nibName: nil, bundle: nil)
         updateTableViewModelRowsBySection()
         updateTableViewModelRows()
@@ -191,13 +178,6 @@ class TunnelDetailTableViewController: NSViewController {
             modelRowsBySection.append(peerSection)
         }
 
-        var onDemandSection = [(isVisible: Bool, modelRow: TableViewModelRow)]()
-        onDemandSection.append((isVisible: true, modelRow: .onDemandRow))
-        if onDemandViewModel.isWiFiInterfaceEnabled {
-            onDemandSection.append((isVisible: true, modelRow: .onDemandSSIDRow))
-        }
-        modelRowsBySection.append(onDemandSection)
-
         tableViewModelRowsBySection = modelRowsBySection
     }
 
@@ -223,19 +203,10 @@ class TunnelDetailTableViewController: NSViewController {
     }
 
     @objc func handleToggleActiveStatusAction() {
-        if tunnel.hasOnDemandRules {
-            let turnOn = !tunnel.isActivateOnDemandEnabled
-            tunnelsManager.setOnDemandEnabled(turnOn, on: tunnel) { error in
-                if error == nil && !turnOn {
-                    self.tunnelsManager.startDeactivation(of: self.tunnel)
-                }
-            }
-        } else {
-            if tunnel.status == .inactive {
-                tunnelsManager.startActivation(of: tunnel)
-            } else if tunnel.status == .active {
-                tunnelsManager.startDeactivation(of: tunnel)
-            }
+        if tunnel.status == .inactive {
+            tunnelsManager.startActivation(of: tunnel)
+        } else if tunnel.status == .active {
+            tunnelsManager.startDeactivation(of: tunnel)
         }
     }
 
@@ -412,26 +383,6 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
             return cell
         case .spacerRow:
             return NSView()
-        case .onDemandRow:
-            let cell: KeyValueRow = tableView.dequeueReusableCell()
-            cell.key = modelRow.localizedSectionKeyString()
-            cell.value = onDemandViewModel.localizedInterfaceDescription
-            cell.isKeyInBold = true
-            return cell
-        case .onDemandSSIDRow:
-            let cell: KeyValueRow = tableView.dequeueReusableCell()
-            cell.key = tr("macFieldOnDemandSSIDs")
-            let value: String
-            if onDemandViewModel.ssidOption == .anySSID {
-                value = onDemandViewModel.ssidOption.localizedUIString
-            } else {
-                value = tr(format: "tunnelOnDemandSSIDOptionDescriptionMac (%1$@: %2$@)",
-                           onDemandViewModel.ssidOption.localizedUIString,
-                           onDemandViewModel.selectedSSIDs.joined(separator: ", "))
-            }
-            cell.value = value
-            cell.isKeyInBold = false
-            return cell
         }
     }
 
@@ -446,15 +397,13 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
             cell.valueImage = TunnelDetailTableViewController.image(for: tunnel)
         }
         cell.statusObservationToken = tunnel.observe(\.status, changeHandler: changeHandler)
-        cell.isOnDemandEnabledObservationToken = tunnel.observe(\.isActivateOnDemandEnabled, changeHandler: changeHandler)
-        cell.hasOnDemandRulesObservationToken = tunnel.observe(\.hasOnDemandRules, changeHandler: changeHandler)
         return cell
     }
 
     func toggleStatusCell() -> NSView {
         let cell: ButtonRow = tableView.dequeueReusableCell()
         cell.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
-        cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive)
+        cell.isButtonEnabled = (tunnel.status == .active || tunnel.status == .inactive)
         cell.buttonToolTip = tr("macToolTipToggleStatus")
         cell.onButtonClicked = { [weak self] in
             self?.handleToggleActiveStatusAction()
@@ -462,89 +411,41 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
         let changeHandler: (TunnelContainer, Any) -> Void = { [weak cell] tunnel, _ in
             guard let cell = cell else { return }
             cell.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
-            cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive)
+            cell.isButtonEnabled = (tunnel.status == .active || tunnel.status == .inactive)
         }
         cell.statusObservationToken = tunnel.observe(\.status, changeHandler: changeHandler)
-        cell.isOnDemandEnabledObservationToken = tunnel.observe(\.isActivateOnDemandEnabled, changeHandler: changeHandler)
-        cell.hasOnDemandRulesObservationToken = tunnel.observe(\.hasOnDemandRules, changeHandler: changeHandler)
         return cell
     }
 
     private static func localizedStatusDescription(for tunnel: TunnelContainer) -> String {
-        let status = tunnel.status
-        let isOnDemandEngaged = tunnel.isActivateOnDemandEnabled
-
-        var text: String
-        switch status {
-        case .inactive:
-            text = tr("tunnelStatusInactive")
-        case .activating:
-            text = tr("tunnelStatusActivating")
-        case .active:
-            text = tr("tunnelStatusActive")
-        case .deactivating:
-            text = tr("tunnelStatusDeactivating")
-        case .reasserting:
-            text = tr("tunnelStatusReasserting")
-        case .restarting:
-            text = tr("tunnelStatusRestarting")
-        case .waiting:
-            text = tr("tunnelStatusWaiting")
+        switch tunnel.status {
+        case .inactive: tr("tunnelStatusInactive")
+        case .activating: tr("tunnelStatusActivating")
+        case .active: tr("tunnelStatusActive")
+        case .deactivating: tr("tunnelStatusDeactivating")
+        case .restarting: tr("tunnelStatusRestarting")
         }
-
-        if tunnel.hasOnDemandRules {
-            text += isOnDemandEngaged ?
-                tr("tunnelStatusAddendumOnDemandEnabled") : tr("tunnelStatusAddendumOnDemandDisabled")
-        }
-
-        return text
     }
 
     private static func image(for tunnel: TunnelContainer?) -> NSImage? {
-        guard let tunnel = tunnel else { return nil }
+        guard let tunnel else { return nil }
         switch tunnel.status {
-        case .active, .restarting, .reasserting:
+        case .active, .restarting:
             return NSImage(named: NSImage.statusAvailableName)
-        case .activating, .waiting, .deactivating:
+        case .activating, .deactivating:
             return NSImage(named: NSImage.statusPartiallyAvailableName)
         case .inactive:
-            if tunnel.isActivateOnDemandEnabled {
-                return NSImage(named: NSImage.Name.statusOnDemandEnabled)
-            } else {
-                return NSImage(named: NSImage.statusNoneName)
-            }
+            return NSImage(named: NSImage.statusNoneName)
         }
     }
 
     private static func localizedToggleStatusActionText(for tunnel: TunnelContainer) -> String {
-        if tunnel.hasOnDemandRules {
-            let turnOn = !tunnel.isActivateOnDemandEnabled
-            if turnOn {
-                return tr("macToggleStatusButtonEnableOnDemand")
-            } else {
-                if tunnel.status == .active {
-                    return tr("macToggleStatusButtonDisableOnDemandDeactivate")
-                } else {
-                    return tr("macToggleStatusButtonDisableOnDemand")
-                }
-            }
-        } else {
-            switch tunnel.status {
-            case .waiting:
-                return tr("macToggleStatusButtonWaiting")
-            case .inactive:
-                return tr("macToggleStatusButtonActivate")
-            case .activating:
-                return tr("macToggleStatusButtonActivating")
-            case .active:
-                return tr("macToggleStatusButtonDeactivate")
-            case .deactivating:
-                return tr("macToggleStatusButtonDeactivating")
-            case .reasserting:
-                return tr("macToggleStatusButtonReasserting")
-            case .restarting:
-                return tr("macToggleStatusButtonRestarting")
-            }
+        switch tunnel.status {
+        case .inactive: tr("macToggleStatusButtonActivate")
+        case .activating: tr("macToggleStatusButtonActivating")
+        case .active: tr("macToggleStatusButtonDeactivate")
+        case .deactivating: tr("macToggleStatusButtonDeactivating")
+        case .restarting: tr("macToggleStatusButtonRestarting")
         }
     }
 }
@@ -552,7 +453,6 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
 extension TunnelDetailTableViewController: TunnelEditViewControllerDelegate {
     func tunnelSaved(tunnel: TunnelContainer) {
         tunnelViewModel = TunnelViewModel(tunnelConfiguration: tunnel.tunnelConfiguration)
-        onDemandViewModel = ActivateOnDemandViewModel(tunnel: tunnel)
         updateTableViewModelRowsBySection()
         updateTableViewModelRows()
         tableView.reloadData()

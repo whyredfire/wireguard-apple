@@ -16,9 +16,6 @@ class TunnelListRow: NSView {
             statusObservationToken = tunnel?.observe(\TunnelContainer.status) { [weak self] tunnel, _ in
                 self?.statusImageView.image = TunnelListRow.image(for: tunnel)
             }
-            isOnDemandEnabledObservationToken = tunnel?.observe(\TunnelContainer.isActivateOnDemandEnabled) { [weak self] tunnel, _ in
-                self?.statusImageView.image = TunnelListRow.image(for: tunnel)
-            }
         }
     }
 
@@ -36,7 +33,6 @@ class TunnelListRow: NSView {
 
     private var statusObservationToken: AnyObject?
     private var nameObservationToken: AnyObject?
-    private var isOnDemandEnabledObservationToken: AnyObject?
 
     init() {
         super.init(frame: CGRect.zero)
@@ -63,16 +59,12 @@ class TunnelListRow: NSView {
     static func image(for tunnel: TunnelContainer?) -> NSImage? {
         guard let tunnel = tunnel else { return nil }
         switch tunnel.status {
-        case .active, .restarting, .reasserting:
+        case .active, .restarting:
             return NSImage(named: NSImage.statusAvailableName)
-        case .activating, .waiting, .deactivating:
+        case .activating, .deactivating:
             return NSImage(named: NSImage.statusPartiallyAvailableName)
         case .inactive:
-            if tunnel.isActivateOnDemandEnabled {
-                return NSImage(named: NSImage.Name.statusOnDemandEnabled)
-            } else {
-                return NSImage(named: NSImage.statusNoneName)
-            }
+            return NSImage(named: NSImage.statusNoneName)
         }
     }
 
@@ -80,8 +72,4 @@ class TunnelListRow: NSView {
         nameLabel.stringValue = ""
         statusImageView.image = nil
     }
-}
-
-extension NSImage.Name {
-    static let statusOnDemandEnabled = NSImage.Name("StatusCircleYellow")
 }

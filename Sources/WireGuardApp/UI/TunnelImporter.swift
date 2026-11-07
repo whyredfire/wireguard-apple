@@ -3,6 +3,7 @@
 
 import Foundation
 
+@MainActor
 class TunnelImporter {
     static func importFromFile(urls: [URL], into tunnelsManager: TunnelsManager, sourceVC: AnyObject?, errorPresenterType: ErrorPresenterProtocol.Type, completionHandler: (() -> Void)? = nil) {
         guard !urls.isEmpty else {
@@ -31,7 +32,7 @@ class TunnelImporter {
                 DispatchQueue.global(qos: .userInitiated).async {
                     let fileContents: String
                     do {
-                        fileContents = try String(contentsOf: url)
+                        fileContents = try String(contentsOf: url, encoding: .utf8)
                     } catch let error {
                         DispatchQueue.main.async {
                             if let cocoaError = error as? CocoaError, cocoaError.isFileError {

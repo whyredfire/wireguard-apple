@@ -4,7 +4,7 @@
 import Cocoa
 import ServiceManagement
 
-@NSApplicationMain
+@main
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     var tunnelsManager: TunnelsManager?
@@ -27,11 +27,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         Logger.configureGlobal(tagged: "APP", withFilePath: FileManager.logFileURL?.path)
-        registerLoginItem(shouldLaunchAtLogin: true)
-
-        var isLaunchedAtLogin = false
-        if let appleEvent = NSAppleEventManager.shared().currentAppleEvent {
-            isLaunchedAtLogin = LaunchedAtLoginDetector.isLaunchedAtLogin(openAppleEvent: appleEvent)
+        let isLaunchedAtLogin = isLaunchingAtLogin
+        if SMAppService.mainApp.status == .notRegistered {
+            do {
+                try SMAppService.mainApp.register()
+            } catch {
+                wg_log(.error, message: "Unable to launch at login: \(error.localizedDescription)")
+            }
         }
 
         NSApp.mainMenu = MainMenu()
@@ -42,7 +44,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             switch result {
             case .failure(let error):
-                ErrorPresenter.showErrorAlert(error: error, from: nil)
+                // Without tunnels there is nothing to show, so quit once the error is read.
+                ErrorPresenter.showErrorAlert(error: error, from: nil, onDismissal: { NSApp.terminate(nil) })
             case .success(let tunnelsManager):
                 let statusMenu = StatusMenu(tunnelsManager: tunnelsManager)
                 statusMenu.windowDelegate = self
@@ -65,21 +68,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private var activeTunnels: [TunnelContainer] {
-        return tunnelsTracker?.tunnelsInOperation.filter { $0.status == .active || $0.status == .activating } ?? []
+    /// The launch event's login-item flag isn't documented for apps registered with `SMAppService`,
+    /// so launches within a minute of logging in count as well.
+    private var isLaunchingAtLogin: Bool {
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        if event?.eventID == kAEOpenApplication,
+           event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem {
+            return true
+        }
+        return Self.consoleLoginDate.map { Date.now.timeIntervalSince($0) < 60 } ?? false
+    }
+
+    private static var consoleLoginDate: Date? {
+        setutxent()
+        defer { endutxent() }
+        while let entry = getutxent()?.pointee {
+            let line = withUnsafeBytes(of: entry.ut_line) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            let user = withUnsafeBytes(of: entry.ut_user) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            if entry.ut_type == USER_PROCESS, line == "console", user == NSUserName() {
+                return Date(timeIntervalSince1970: TimeInterval(entry.ut_tv.tv_sec))
+            }
+        }
+        return nil
     }
 
     @objc func confirmAndQuit() {
         let alert = NSAlert()
         alert.messageText = tr("macConfirmAndQuitAlertMessage")
-        let activeTunnels = self.activeTunnels
-        if activeTunnels.count == 1 {
-            alert.informativeText = tr(format: "macConfirmAndQuitInfoWithActiveTunnel (%@)", activeTunnels[0].name)
-        } else if activeTunnels.count > 1 {
-            alert.informativeText = tr(format: "macConfirmAndQuitInfoWithMultipleActiveTunnels (%@)", activeTunnels.map { $0.name }.joined(separator: ", "))
-        } else {
-            alert.informativeText = tr("macConfirmAndQuitAlertInfo")
-        }
+        alert.informativeText = tr("macConfirmAndQuitAlertInfo")
         alert.addButton(withTitle: tr("macConfirmAndQuitAlertCloseWindow"))
         alert.addButton(withTitle: tr("macConfirmAndQuitAlertQuitWireGuard"))
 
@@ -105,60 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             manageWindow.orderFront(self)
             return
         }
-        registerLoginItem(shouldLaunchAtLogin: false)
-        guard !activeTunnels.isEmpty else {
-            NSApp.terminate(nil)
-            return
-        }
-        let alert = NSAlert()
-        alert.messageText = tr("macAppExitingWithActiveTunnelMessage")
-        alert.informativeText = tr("macAppExitingWithActiveTunnelInfo")
-        NSApp.activate(ignoringOtherApps: true)
-        if let manageWindow = manageTunnelsWindowObject {
-            manageWindow.orderFront(self)
-            alert.beginSheetModal(for: manageWindow) { _ in
-                NSApp.terminate(nil)
-            }
-        } else {
-            alert.runModal()
-            NSApp.terminate(nil)
-        }
-    }
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let activeTunnels = self.activeTunnels
-        guard !activeTunnels.isEmpty else {
-            return .terminateNow
-        }
-        guard let appleEvent = NSAppleEventManager.shared().currentAppleEvent else {
-            return .terminateNow
-        }
-        guard MacAppStoreUpdateDetector.isUpdatingFromMacAppStore(quitAppleEvent: appleEvent) else {
-            return .terminateNow
-        }
-        let alert = NSAlert()
-        alert.messageText = tr("macAppStoreUpdatingAlertMessage")
-        let onDemandTunnels = activeTunnels.filter { $0.isActivateOnDemandEnabled }
-        if activeTunnels.count == 1 {
-            if onDemandTunnels.isEmpty {
-                alert.informativeText = tr(format: "macAppStoreUpdatingAlertInfoWithoutOnDemand (%@)", activeTunnels[0].name)
-            } else {
-                alert.informativeText = tr(format: "macAppStoreUpdatingAlertInfoWithOnDemand (%@)", activeTunnels[0].name)
-            }
-        } else {
-            if onDemandTunnels.isEmpty {
-                alert.informativeText = tr(format: "macAppStoreUpdatingAlertInfoWithoutOnDemandMultiple (%@)", activeTunnels.map { $0.name }.joined(separator: ", "))
-            } else {
-                alert.informativeText = tr(format: "macAppStoreUpdatingAlertInfoWithOnDemandMultiple (%@)", onDemandTunnels.map { $0.name }.joined(separator: ", "))
-            }
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        if let manageWindow = manageTunnelsWindowObject {
-            alert.beginSheetModal(for: manageWindow) { _ in }
-        } else {
-            alert.runModal()
-        }
-        return .terminateCancel
+        NSApp.terminate(nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ application: NSApplication) -> Bool {
@@ -249,18 +212,5 @@ extension AppDelegate: StatusMenuWindowDelegate {
             manageTunnelsWindowObject?.makeKeyAndOrderFront(self)
             completion?(manageTunnelsWindowObject)
         }
-    }
-}
-
-@discardableResult
-func registerLoginItem(shouldLaunchAtLogin: Bool) -> Bool {
-    let appId = Bundle.main.bundleIdentifier!
-    let helper = SMAppService.loginItem(identifier: "\(appId).login-item-helper")
-    do {
-        try shouldLaunchAtLogin ? helper.register() : helper.unregister()
-        return true
-    } catch {
-        wg_log(.error, message: "Unable to \(shouldLaunchAtLogin ? "register" : "unregister") the login item: \(error)")
-        return false
     }
 }
