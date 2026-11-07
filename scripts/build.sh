@@ -19,8 +19,18 @@ BIN="$(swift build -c release --arch arm64 --show-bin-path)"
 rm -rf build
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$(dirname "$HELPER")"
 
-(cd Sources/WireGuardHelper && CGO_ENABLED=1 GOARCH=arm64 CGO_CFLAGS=-mmacosx-version-min=26.0 \
-    CGO_LDFLAGS=-mmacosx-version-min=26.0 go build -trimpath -ldflags=-w -o "$OLDPWD/$HELPER" .)
+# wireguard-go's timers must count time asleep, so build the helper with Go's runtime patched to
+# use mach_continuous_time, which unlike mach_absolute_time keeps running while the Mac sleeps.
+GOROOT_PATCHED="$PWD/.build/goroot-$(go env GOVERSION)"
+if [ ! -f "$GOROOT_PATCHED/.patched" ]; then
+    rm -rf .build/goroot-*
+    rsync -a --exclude=pkg/obj/go-build "$(go env GOROOT)/" "$GOROOT_PATCHED/"
+    patch -p1 -f -N -r- -d "$GOROOT_PATCHED" < Sources/WireGuardHelper/goruntime-boottime-over-monotonic.diff
+    touch "$GOROOT_PATCHED/.patched"
+fi
+(cd Sources/WireGuardHelper && GOROOT="$GOROOT_PATCHED" CGO_ENABLED=1 GOARCH=arm64 \
+    CGO_CFLAGS=-mmacosx-version-min=26.0 CGO_LDFLAGS=-mmacosx-version-min=26.0 \
+    go build -trimpath -ldflags=-w -o "$OLDPWD/$HELPER" .)
 
 sed -e "s/\$(APP_ID_MACOS)/$APP_ID/g" -e "s/\$(VERSION_ID)/$BUILD/g" -e "s/\$(WIREGUARD_GO_VERSION)/$GO_VERSION/g" \
     Sources/WireGuardApp/UI/macOS/Info.plist > "$APP/Contents/Info.plist"
