@@ -14,7 +14,6 @@ class StatusMenu: NSMenu {
     let tunnelsManager: TunnelsManager
 
     var statusMenuItem: NSMenuItem?
-    var networksMenuItem: NSMenuItem?
     var deactivateMenuItem: NSMenuItem?
 
     private let tunnelsBreakdownMenu = NSMenu()
@@ -62,25 +61,18 @@ class StatusMenu: NSMenu {
         let statusMenuItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         addItem(statusMenuItem)
-        let networksMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        networksMenuItem.isEnabled = false
-        networksMenuItem.isHidden = true
-        addItem(networksMenuItem)
         let deactivateMenuItem = NSMenuItem(title: tr("macToggleStatusButtonDeactivate"), action: #selector(deactivateClicked), keyEquivalent: "")
         deactivateMenuItem.target = self
         deactivateMenuItem.isHidden = true
         addItem(deactivateMenuItem)
         self.statusMenuItem = statusMenuItem
-        self.networksMenuItem = networksMenuItem
         self.deactivateMenuItem = deactivateMenuItem
     }
 
     func updateStatusMenuItems() {
-        guard let statusMenuItem = statusMenuItem, let networksMenuItem = networksMenuItem, let deactivateMenuItem = deactivateMenuItem else { return }
+        guard let statusMenuItem = statusMenuItem, let deactivateMenuItem = deactivateMenuItem else { return }
         guard !tunnelsInOperation.isEmpty else {
             statusMenuItem.title = tr(format: "macStatus (%@)", tr("tunnelStatusInactive"))
-            networksMenuItem.title = ""
-            networksMenuItem.isHidden = true
             deactivateMenuItem.title = tr("macToggleStatusButtonDeactivate")
             deactivateMenuItem.isHidden = true
             return
@@ -88,8 +80,6 @@ class StatusMenu: NSMenu {
 
         guard tunnelsInOperation.count == 1 else {
             statusMenuItem.title = tr(format: "macStatus (%@)", tr(format: "macStatusMultipleTunnels (%d)", tunnelsInOperation.count))
-            networksMenuItem.title = ""
-            networksMenuItem.isHidden = true
             deactivateMenuItem.title = tr("macToggleStatusButtonDeactivateAll")
             deactivateMenuItem.isHidden = !tunnelsInOperation.contains { $0.status == .active }
             return
@@ -105,19 +95,6 @@ class StatusMenu: NSMenu {
         }
 
         statusMenuItem.title = tr(format: "macStatus (%@)", statusText)
-
-        if tunnel.status == .inactive {
-            networksMenuItem.title = ""
-            networksMenuItem.isHidden = true
-        } else {
-            let allowedIPs = tunnel.tunnelConfiguration?.peers.flatMap { $0.allowedIPs }.map { $0.stringRepresentation }.joined(separator: ", ") ?? ""
-            if !allowedIPs.isEmpty {
-                networksMenuItem.title = tr(format: "macMenuNetworks (%@)", allowedIPs)
-            } else {
-                networksMenuItem.title = tr("macMenuNetworksNone")
-            }
-            networksMenuItem.isHidden = false
-        }
         deactivateMenuItem.title = tr("macToggleStatusButtonDeactivate")
         deactivateMenuItem.isHidden = tunnel.status != .active
     }

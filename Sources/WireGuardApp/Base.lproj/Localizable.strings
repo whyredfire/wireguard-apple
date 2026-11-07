@@ -308,8 +308,6 @@
 
 // Mac status bar menu / pulldown menu / main menu
 
-"macMenuNetworks (%@)" = "Networks: %@";
-"macMenuNetworksNone" = "Networks: None";
 
 "macMenuTitle" = "WireGuard";
 "macTunnelsMenuTitle" = "Tunnels";
