@@ -31,7 +31,7 @@ let appLocalizations = [
 let package = Package(
     name: "WireGuardKit",
     platforms: [
-        .macOS(.v12),
+        .macOS(.v13),
         .iOS(.v15)
     ],
     products: [

@@ -30,7 +30,7 @@
 		<string>WireGuardNetworkExtension.PacketTunnelProvider</string>
 	</dict>
 	<key>LSMinimumSystemVersion</key>
-	<string>12.0</string>
+	<string>13.0</string>
 	<key>com.wireguard.macos.app_group_id</key>
 	<string>$(DEVELOPMENT_TEAM).group.$(APP_ID_MACOS)</string>
 </dict>
