@@ -3,6 +3,10 @@
 
 import Foundation
 
+#if SWIFT_PACKAGE
+import WireGuardKitCore
+#endif
+
 extension Array {
 
     /// Returns an array containing the results of mapping the given closure over the sequence’s

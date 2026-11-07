@@ -6,6 +6,7 @@ import Network
 import NetworkExtension
 
 #if SWIFT_PACKAGE
+import WireGuardKitCore
 import WireGuardKitC
 #endif
 
