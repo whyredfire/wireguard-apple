@@ -3,35 +3,34 @@
 
 //go:build darwin || freebsd
 
-package osrouter
+package router
 
 import (
-	"fmt"
 	"log"
 	"net/netip"
 	"os/exec"
 	"runtime"
 
-	"github.com/tailscale/wireguard-go/tun"
-	"go4.org/netipx"
-	"tailscale.com/health"
-	"tailscale.com/net/netmon"
-	"tailscale.com/net/tsaddr"
-	"tailscale.com/types/logger"
-	"tailscale.com/version"
-	"tailscale.com/wgengine/router"
+	"golang.zx2c4.com/wireguard/tun"
+	"wireguard-helper/internal/tailscale/logger"
 )
+
+// Config is the subset of Tailscale's router.Config that applies here.
+type Config struct {
+	LocalAddrs []netip.Prefix
+	Routes     []netip.Prefix
+}
+
+var shutdownConfig = Config{}
 
 type userspaceBSDRouter struct {
 	logf    logger.Logf
-	netMon  *netmon.Monitor
-	health  *health.Tracker
 	tunname string
 	local   []netip.Prefix
 	routes  map[netip.Prefix]bool
 }
 
-func newUserspaceBSDRouter(logf logger.Logf, tundev tun.Device, netMon *netmon.Monitor, health *health.Tracker) (*userspaceBSDRouter, error) {
+func New(logf logger.Logf, tundev tun.Device) (*userspaceBSDRouter, error) {
 	tunname, err := tundev.Name()
 	if err != nil {
 		return nil, err
@@ -39,8 +38,6 @@ func newUserspaceBSDRouter(logf logger.Logf, tundev tun.Device, netMon *netmon.M
 
 	return &userspaceBSDRouter{
 		logf:    logf,
-		netMon:  netMon,
-		health:  health,
 		tunname: tunname,
 	}, nil
 }
@@ -100,7 +97,7 @@ func inet(p netip.Prefix) string {
 	return "inet"
 }
 
-func (r *userspaceBSDRouter) Set(cfg *router.Config) (reterr error) {
+func (r *userspaceBSDRouter) Set(cfg *Config) (reterr error) {
 	if cfg == nil {
 		cfg = &shutdownConfig
 	}
@@ -146,24 +143,13 @@ func (r *userspaceBSDRouter) Set(cfg *router.Config) (reterr error) {
 
 	newRoutes := make(map[netip.Prefix]bool)
 	for _, route := range cfg.Routes {
-		if runtime.GOOS != "darwin" && route == tsaddr.TailscaleULARange() {
-			// Because we added the interface address as a /48 above,
-			// the kernel already created the Tailscale ULA route
-			// implicitly. We mustn't try to add/delete it ourselves.
-			continue
-		}
 		newRoutes[route] = true
 	}
 	// Delete any preexisting routes.
 	for route := range r.routes {
 		if resetRoutes || !newRoutes[route] {
-			net := netipx.PrefixIPNet(route)
-			nip := net.IP.Mask(net.Mask)
-			nstr := fmt.Sprintf("%v/%d", nip, route.Bits())
-			del := "del"
-			if version.OS() == "macOS" {
-				del = "delete"
-			}
+			nstr := route.Masked().String()
+			del := "delete"
 			routedel := []string{"route", "-q", "-n",
 				del, "-" + inet(route), nstr,
 				"-iface", r.tunname}
@@ -177,9 +163,7 @@ func (r *userspaceBSDRouter) Set(cfg *router.Config) (reterr error) {
 	// Add the routes.
 	for route := range newRoutes {
 		if resetRoutes || !r.routes[route] {
-			net := netipx.PrefixIPNet(route)
-			nip := net.IP.Mask(net.Mask)
-			nstr := fmt.Sprintf("%v/%d", nip, route.Bits())
+			nstr := route.Masked().String()
 			routeadd := []string{"route", "-q", "-n",
 				"add", "-" + inet(route), nstr,
 				"-iface", r.tunname}

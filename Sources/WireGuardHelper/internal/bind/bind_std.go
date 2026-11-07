@@ -3,12 +3,13 @@
  * Copyright (C) 2017-2025 WireGuard LLC. All Rights Reserved.
  */
 
-package conn
+package bind
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	wgconn "golang.zx2c4.com/wireguard/conn"
 	"net"
 	"net/netip"
 	"runtime"
@@ -21,7 +22,7 @@ import (
 )
 
 var (
-	_ Bind = (*StdNetBind)(nil)
+	_ wgconn.Bind = (*StdNetBind)(nil)
 )
 
 // StdNetBind implements Bind for all platforms. While Windows has its own Bind
@@ -48,7 +49,7 @@ type StdNetBind struct {
 	blackhole6 bool
 }
 
-func NewStdNetBind() Bind {
+func NewStdNetBind() wgconn.Bind {
 	return &StdNetBind{
 		udpAddrPool: sync.Pool{
 			New: func() any {
@@ -62,7 +63,7 @@ func NewStdNetBind() Bind {
 			New: func() any {
 				// ipv6.Message and ipv4.Message are interchangeable as they are
 				// both aliases for x/net/internal/socket.Message.
-				msgs := make([]ipv6.Message, IdealBatchSize)
+				msgs := make([]ipv6.Message, wgconn.IdealBatchSize)
 				for i := range msgs {
 					msgs[i].Buffers = make(net.Buffers, 1)
 					msgs[i].OOB = make([]byte, 0, stickyControlSize+gsoControlSize)
@@ -83,11 +84,11 @@ type StdNetEndpoint struct {
 }
 
 var (
-	_ Bind     = (*StdNetBind)(nil)
-	_ Endpoint = &StdNetEndpoint{}
+	_ wgconn.Bind     = (*StdNetBind)(nil)
+	_ wgconn.Endpoint = &StdNetEndpoint{}
 )
 
-func (*StdNetBind) ParseEndpoint(s string) (Endpoint, error) {
+func (*StdNetBind) ParseEndpoint(s string) (wgconn.Endpoint, error) {
 	e, err := netip.ParseAddrPort(s)
 	if err != nil {
 		return nil, err
@@ -137,7 +138,7 @@ func listenNet(network string, port int) (*net.UDPConn, int, error) {
 	return conn.(*net.UDPConn), uaddr.Port, nil
 }
 
-func (s *StdNetBind) Open(uport uint16) ([]ReceiveFunc, uint16, error) {
+func (s *StdNetBind) Open(uport uint16) ([]wgconn.ReceiveFunc, uint16, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -145,7 +146,7 @@ func (s *StdNetBind) Open(uport uint16) ([]ReceiveFunc, uint16, error) {
 	var tries int
 
 	if s.ipv4 != nil || s.ipv6 != nil {
-		return nil, 0, ErrBindAlreadyOpen
+		return nil, 0, wgconn.ErrBindAlreadyOpen
 	}
 
 	// Attempt to open ipv4 and ipv6 listeners on the same port.
@@ -172,7 +173,7 @@ again:
 		v4conn.Close()
 		return nil, 0, err
 	}
-	var fns []ReceiveFunc
+	var fns []wgconn.ReceiveFunc
 	if v4conn != nil {
 		s.ipv4TxOffload, s.ipv4RxOffload = supportsUDPOffload(v4conn)
 		if runtime.GOOS == "linux" || runtime.GOOS == "android" {
@@ -229,7 +230,7 @@ func (s *StdNetBind) receiveIP(
 	rxOffload bool,
 	bufs [][]byte,
 	sizes []int,
-	eps []Endpoint,
+	eps []wgconn.Endpoint,
 ) (n int, err error) {
 	msgs := s.getMessages()
 	for i := range bufs {
@@ -240,7 +241,7 @@ func (s *StdNetBind) receiveIP(
 	var numMsgs int
 	if runtime.GOOS == "linux" || runtime.GOOS == "android" {
 		if rxOffload {
-			readAt := len(*msgs) - (IdealBatchSize / udpSegmentMaxDatagrams)
+			readAt := len(*msgs) - (wgconn.IdealBatchSize / udpSegmentMaxDatagrams)
 			numMsgs, err = br.ReadBatch((*msgs)[readAt:], 0)
 			if err != nil {
 				return 0, err
@@ -277,14 +278,14 @@ func (s *StdNetBind) receiveIP(
 	return numMsgs, nil
 }
 
-func (s *StdNetBind) makeReceiveIPv4(pc *ipv4.PacketConn, conn *net.UDPConn, rxOffload bool) ReceiveFunc {
-	return func(bufs [][]byte, sizes []int, eps []Endpoint) (n int, err error) {
+func (s *StdNetBind) makeReceiveIPv4(pc *ipv4.PacketConn, conn *net.UDPConn, rxOffload bool) wgconn.ReceiveFunc {
+	return func(bufs [][]byte, sizes []int, eps []wgconn.Endpoint) (n int, err error) {
 		return s.receiveIP(pc, conn, rxOffload, bufs, sizes, eps)
 	}
 }
 
-func (s *StdNetBind) makeReceiveIPv6(pc *ipv6.PacketConn, conn *net.UDPConn, rxOffload bool) ReceiveFunc {
-	return func(bufs [][]byte, sizes []int, eps []Endpoint) (n int, err error) {
+func (s *StdNetBind) makeReceiveIPv6(pc *ipv6.PacketConn, conn *net.UDPConn, rxOffload bool) wgconn.ReceiveFunc {
+	return func(bufs [][]byte, sizes []int, eps []wgconn.Endpoint) (n int, err error) {
 		return s.receiveIP(pc, conn, rxOffload, bufs, sizes, eps)
 	}
 }
@@ -293,7 +294,7 @@ func (s *StdNetBind) makeReceiveIPv6(pc *ipv6.PacketConn, conn *net.UDPConn, rxO
 // rename the IdealBatchSize constant to BatchSize.
 func (s *StdNetBind) BatchSize() int {
 	if runtime.GOOS == "linux" || runtime.GOOS == "android" {
-		return IdealBatchSize
+		return wgconn.IdealBatchSize
 	}
 	return 1
 }
@@ -338,7 +339,7 @@ func (e ErrUDPGSODisabled) Unwrap() error {
 	return e.RetryErr
 }
 
-func (s *StdNetBind) Send(bufs [][]byte, endpoint Endpoint) error {
+func (s *StdNetBind) Send(bufs [][]byte, endpoint wgconn.Endpoint) error {
 	s.mu.Lock()
 	blackhole := s.blackhole4
 	conn := s.ipv4

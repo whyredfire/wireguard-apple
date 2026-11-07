@@ -11,16 +11,8 @@ import (
 
 	"golang.org/x/net/route"
 	"golang.org/x/sys/unix"
-	"tailscale.com/net/netaddr"
-	"tailscale.com/types/logger"
-	"tailscale.com/util/eventbus"
+	"wireguard-helper/internal/tailscale/logger"
 )
-
-func init() {
-	IsInterestingInterface = func(iface Interface, prefixes []netip.Prefix) bool {
-		return isInterestingInterface(iface.Name)
-	}
-}
 
 const debugRouteMessages = false
 
@@ -31,7 +23,7 @@ type unspecifiedMessage struct{}
 
 func (unspecifiedMessage) ignore() bool { return false }
 
-func newOSMon(_ *eventbus.Bus, logf logger.Logf, _ *Monitor) (osMon, error) {
+func newOSMon(logf logger.Logf) (osMon, error) {
 	fd, err := unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, 0)
 	if err != nil {
 		return nil, err
@@ -212,7 +204,7 @@ func (m *darwinRouteMon) logAddrs(addrs []route.Addr) {
 func ipOfAddr(a route.Addr) netip.Addr {
 	switch a := a.(type) {
 	case *route.Inet4Addr:
-		return netaddr.IPv4(a.IP[0], a.IP[1], a.IP[2], a.IP[3])
+		return netip.AddrFrom4(a.IP)
 	case *route.Inet6Addr:
 		ip := netip.AddrFrom16(a.IP)
 		if a.ZoneID != 0 {

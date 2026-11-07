@@ -7,44 +7,47 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
-	"go4.org/mem"
-	"tailscale.com/control/controlknobs"
-	"tailscale.com/health"
-	"tailscale.com/net/dns/resolvconffile"
-	"tailscale.com/net/tsaddr"
-	"tailscale.com/types/logger"
-	"tailscale.com/util/eventbus"
-	"tailscale.com/util/mak"
-	"tailscale.com/util/syspolicy/policyclient"
+	"wireguard-helper/internal/tailscale/logger"
 )
 
-// NewOSConfigurator creates a new OS configurator.
-//
-// The health tracker, bus and the knobs may be nil and are ignored on this platform.
-func NewOSConfigurator(logf logger.Logf, _ *health.Tracker, _ *eventbus.Bus, _ policyclient.Client, _ *controlknobs.Knobs, ifName string) (OSConfigurator, error) {
+// OSConfig is the subset of Tailscale's OSConfig that applies here.
+type OSConfig struct {
+	Nameservers   []netip.Addr
+	SearchDomains []string
+	MatchDomains  []string
+}
+
+// NewOSConfigurator creates a new OS configurator for the tunnel on ifName.
+// Each tunnel keeps its own dynamic-store key and resolver files.
+func NewOSConfigurator(logf logger.Logf, ifName string) *darwinConfigurator {
 	return &darwinConfigurator{
-		logf:           logf,
-		ifName:         ifName,
-		resolverDir:    "/etc/resolver",
-		resolvConfPath: "/etc/resolv.conf",
-		runScutil:      runScutil,
-	}, nil
+		logf:         logf,
+		ifName:       ifName,
+		resolverDir:  resolverDir,
+		runScutil:    runScutil,
+		globalDNSKey: "State:/Network/Service/" + serviceIDPrefix + ifName + "/DNS",
+		header:       resolverFileHeader + ifName + "\n",
+		searchFile:   "search.wireguard-" + ifName,
+	}
 }
 
 // darwinConfigurator is the tailscaled-on-macOS DNS OS configurator that
 // maintains the Split DNS nameserver entries pointing MagicDNS DNS suffixes
 // to 100.100.100.100 using the macOS /etc/resolver/$SUFFIX files.
 type darwinConfigurator struct {
-	logf           logger.Logf
-	ifName         string
-	resolverDir    string // default "/etc/resolver"
-	resolvConfPath string // default "/etc/resolv.conf"
-	runScutil      func(script string) (output string, err error)
+	logf         logger.Logf
+	ifName       string
+	resolverDir  string // default "/etc/resolver"
+	runScutil    func(script string) (output string, err error)
+	globalDNSKey string
+	header       string
+	searchFile   string
 }
 
 func (c *darwinConfigurator) Close() error {
@@ -70,7 +73,7 @@ func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 	}
 
 	var buf bytes.Buffer
-	buf.WriteString(macResolverFileHeader)
+	buf.WriteString(c.header)
 	for _, ip := range cfg.Nameservers {
 		buf.WriteString("nameserver ")
 		buf.WriteString(ip.String())
@@ -87,19 +90,19 @@ func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 	}
 	defer root.Close()
 
-	var keep map[string]bool
+	keep := map[string]bool{}
 
 	// Add a dummy file to /etc/resolver with a "search ..." directive if we have
 	// search suffixes to add.
 	if len(cfg.SearchDomains) > 0 {
-		const searchFile = "search.tailscale" // fake DNS suffix+TLD to put our search
-		mak.Set(&keep, searchFile, true)
+		searchFile := c.searchFile // fake DNS suffix+TLD to put our search
+		keep[searchFile] = true
 		var sbuf bytes.Buffer
-		sbuf.WriteString(macResolverFileHeader)
+		sbuf.WriteString(c.header)
 		sbuf.WriteString("search")
 		for _, d := range cfg.SearchDomains {
 			sbuf.WriteString(" ")
-			sbuf.WriteString(string(d.WithoutTrailingDot()))
+			sbuf.WriteString(strings.TrimSuffix(d, "."))
 		}
 		sbuf.WriteString("\n")
 		if err := root.WriteFile(searchFile, sbuf.Bytes(), 0644); err != nil {
@@ -108,8 +111,8 @@ func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 	}
 
 	for _, d := range cfg.MatchDomains {
-		fileBase := string(d.WithoutTrailingDot())
-		mak.Set(&keep, fileBase, true)
+		fileBase := strings.TrimSuffix(d, ".")
+		keep[fileBase] = true
 
 		if !isValidResolverFileName(fileBase) {
 			c.logf("[unexpected] invalid resolver domain %q with slashes or colons", fileBase)
@@ -122,12 +125,6 @@ func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 	}
 	return c.removeResolverFiles(func(domain string) bool { return !keep[domain] })
 }
-
-// macOSGlobalDNSKey is a stable synthetic SystemConfiguration service key for
-// tailscaled's global DNS resolver. The UUID does not identify a real network
-// service; it just gives tailscaled one well-known dynamic-store location to
-// set and later remove.
-const macOSGlobalDNSKey = "State:/Network/Service/FF457792-79C0-4A25-8392-D875BBEACCA6/DNS"
 
 // setGlobalDNS installs cfg.Nameservers as a default resolver using
 // SystemConfiguration's dynamic store. /etc/resolver is only a split-DNS
@@ -148,12 +145,12 @@ func (c *darwinConfigurator) setGlobalDNS(cfg OSConfig) error {
 		script.WriteString("d.add SearchDomains *")
 		for _, fqdn := range cfg.SearchDomains {
 			script.WriteByte(' ')
-			writeScutilString(&script, fqdn.WithoutTrailingDot())
+			writeScutilString(&script, strings.TrimSuffix(fqdn, "."))
 		}
 		script.WriteByte('\n')
 	}
 	script.WriteString("set ")
-	script.WriteString(macOSGlobalDNSKey)
+	script.WriteString(c.globalDNSKey)
 	script.WriteString("\nquit\n")
 
 	out, err := c.runScutilScript(script.String())
@@ -162,13 +159,13 @@ func (c *darwinConfigurator) setGlobalDNS(cfg OSConfig) error {
 	}
 	out = strings.TrimSpace(out)
 	if out != "" {
-		return fmt.Errorf("scutil set %s: %s", macOSGlobalDNSKey, out)
+		return fmt.Errorf("scutil set %s: %s", c.globalDNSKey, out)
 	}
 	return nil
 }
 
 func (c *darwinConfigurator) removeGlobalDNS() error {
-	script := "remove " + macOSGlobalDNSKey + "\nquit\n"
+	script := "remove " + c.globalDNSKey + "\nquit\n"
 	out, err := c.runScutilScript(script)
 	if err != nil {
 		return err
@@ -177,7 +174,7 @@ func (c *darwinConfigurator) removeGlobalDNS() error {
 	if out == "" || out == "No such key" {
 		return nil
 	}
-	return fmt.Errorf("scutil remove %s: %s", macOSGlobalDNSKey, out)
+	return fmt.Errorf("scutil remove %s: %s", c.globalDNSKey, out)
 }
 
 func (c *darwinConfigurator) runScutilScript(script string) (string, error) {
@@ -221,40 +218,6 @@ func isValidResolverFileName(name string) bool {
 	return true
 }
 
-// GetBaseConfig returns the current OS DNS configuration, extracting it from /etc/resolv.conf.
-// We should really be using the SystemConfiguration framework to get this information, as this
-// is not a stable public API, and is provided mostly as a compatibility effort with Unix
-// tools. Apple might break this in the future. But honestly, parsing the output of `scutil --dns`
-// is *even more* likely to break in the future.
-func (c *darwinConfigurator) GetBaseConfig() (OSConfig, error) {
-	cfg := OSConfig{}
-
-	resolvConf, err := resolvconffile.ParseFile(c.resolvConfPath)
-	if err != nil {
-		c.logf("failed to parse %s: %v", c.resolvConfPath, err)
-		return cfg, ErrGetBaseConfigNotSupported
-	}
-
-	for _, ns := range resolvConf.Nameservers {
-		if ns == tsaddr.TailscaleServiceIP() || ns == tsaddr.TailscaleServiceIPv6() {
-			// If we find Quad100 in /etc/resolv.conf, we should ignore it
-			c.logf("ignoring 100.100.100.100 resolver IP found in /etc/resolv.conf")
-			continue
-		}
-		cfg.Nameservers = append(cfg.Nameservers, ns)
-	}
-	cfg.SearchDomains = resolvConf.SearchDomains
-
-	if len(cfg.Nameservers) == 0 {
-		// Log a warning in case we couldn't find any nameservers in /etc/resolv.conf.
-		c.logf("no nameservers found in %s, DNS resolution might fail", c.resolvConfPath)
-	}
-
-	return cfg, nil
-}
-
-const macResolverFileHeader = "# Added by tailscaled\n"
-
 // removeResolverFiles deletes all files in /etc/resolver for which the shouldDelete
 // func returns true.
 func (c *darwinConfigurator) removeResolverFiles(shouldDelete func(domain string) bool) error {
@@ -286,7 +249,7 @@ func (c *darwinConfigurator) removeResolverFiles(shouldDelete func(domain string
 			}
 			return err
 		}
-		if !mem.HasPrefix(mem.B(contents), mem.S(macResolverFileHeader)) {
+		if !bytes.HasPrefix(contents, []byte(c.header)) {
 			continue
 		}
 		if err := root.Remove(name); err != nil {
