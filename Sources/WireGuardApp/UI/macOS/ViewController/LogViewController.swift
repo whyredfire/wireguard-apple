@@ -5,6 +5,7 @@ import Cocoa
 
 class LogViewController: NSViewController {
 
+    @MainActor
     enum LogColumn: String {
         case time = "Time"
         case logMessage = "LogMessage"
@@ -18,8 +19,7 @@ class LogViewController: NSViewController {
         }
     }
 
-    private var boundsChangedNotificationToken: NotificationToken?
-    private var frameChangedNotificationToken: NotificationToken?
+    private var notificationTasks: [Task<Void, Never>] = []
 
     let scrollView: NSScrollView = {
         let scrollView = NSScrollView()
@@ -83,7 +83,7 @@ class LogViewController: NSViewController {
     var isFetchingLogEntries = false
     var isInScrolledToEndMode = true
 
-    private var updateLogEntriesTimer: Timer?
+    private var updateLogEntriesTask: Task<Void, Never>?
 
     init(tunnelsManager: TunnelsManager) {
         self.tunnelsManager = tunnelsManager
@@ -110,20 +110,22 @@ class LogViewController: NSViewController {
         clipView.documentView = tableView
         scrollView.contentView = clipView
 
-        boundsChangedNotificationToken = NotificationCenter.default.observe(name: NSView.boundsDidChangeNotification, object: clipView, queue: OperationQueue.main) { [weak self] _ in
-            guard let self = self else { return }
-            let lastVisibleRowIndex = self.tableView.row(at: NSPoint(x: 0, y: self.scrollView.contentView.documentVisibleRect.maxY - 1))
-            self.isInScrolledToEndMode = lastVisibleRowIndex < 0 || lastVisibleRowIndex == self.logEntries.count - 1
-        }
-
-        frameChangedNotificationToken = NotificationCenter.default.observe(name: NSView.frameDidChangeNotification, object: tableView, queue: OperationQueue.main) { [weak self] _ in
-            guard let self = self else { return }
-            if self.isInScrolledToEndMode {
-                DispatchQueue.main.async {
+        clipView.postsBoundsChangedNotifications = true
+        notificationTasks = [
+            Task { [weak self, weak clipView] in
+                for await _ in NotificationCenter.default.notifications(named: NSView.boundsDidChangeNotification, object: clipView).map({ _ in () }) {
+                    guard let self else { return }
+                    let lastVisibleRowIndex = self.tableView.row(at: NSPoint(x: 0, y: self.scrollView.contentView.documentVisibleRect.maxY - 1))
+                    self.isInScrolledToEndMode = lastVisibleRowIndex < 0 || lastVisibleRowIndex == self.logEntries.count - 1
+                }
+            },
+            Task { [weak self, weak tableView, weak clipView] in
+                for await _ in NotificationCenter.default.notifications(named: NSView.frameDidChangeNotification, object: tableView).map({ _ in () }) {
+                    guard let self, let clipView, self.isInScrolledToEndMode else { continue }
                     self.tableView.scroll(NSPoint(x: 0, y: self.tableView.frame.maxY - clipView.documentVisibleRect.height))
                 }
             }
-        }
+        ]
 
         let margin: CGFloat = 20
         let internalSpacing: CGFloat = 10
@@ -168,17 +170,8 @@ class LogViewController: NSViewController {
     func updateLogEntries() {
         guard !isFetchingLogEntries else { return }
         isFetchingLogEntries = true
-        guard let logViewHelper else {
-            appendHelperLog(merging: [])
-            return
-        }
-        logViewHelper.fetchLogEntriesSinceLastFetch { [weak self] appLogEntries in
-            self?.appendHelperLog(merging: appLogEntries)
-        }
-    }
-
-    private func appendHelperLog(merging appLogEntries: [LogViewHelper.LogEntry]) {
         Task {
+            let appLogEntries = await logViewHelper?.fetchNewEntries() ?? []
             let (helperLogEntries, cursor) = await tunnelsManager.helperLog(since: helperLogCursor)
             helperLogCursor = cursor
             append((appLogEntries + helperLogEntries).sorted { $0.timestamp < $1.timestamp })
@@ -200,18 +193,18 @@ class LogViewController: NSViewController {
     }
 
     func startUpdatingLogEntries() {
-        updateLogEntries()
-        updateLogEntriesTimer?.invalidate()
-        let timer = Timer(timeInterval: 1 /* second */, repeats: true) { [weak self] _ in
-            self?.updateLogEntries()
+        updateLogEntriesTask?.cancel()
+        updateLogEntriesTask = Task { [weak self] in
+            while !Task.isCancelled, self != nil {
+                self?.updateLogEntries()
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
-        updateLogEntriesTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
     }
 
     func stopUpdatingLogEntries() {
-        updateLogEntriesTimer?.invalidate()
-        updateLogEntriesTimer = nil
+        updateLogEntriesTask?.cancel()
+        updateLogEntriesTask = nil
     }
 
     override func viewWillAppear() {

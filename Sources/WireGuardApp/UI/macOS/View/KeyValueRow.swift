@@ -49,7 +49,7 @@ class EditableKeyValueRow: NSView {
         set(value) { valueImageView?.image = value }
     }
 
-    var statusObservationToken: AnyObject?
+    var statusObservationToken: ObservationToken?
 
     override var intrinsicContentSize: NSSize {
         let height = max(keyLabel.intrinsicContentSize.height, valueLabel.intrinsicContentSize.height)

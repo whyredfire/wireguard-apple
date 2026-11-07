@@ -20,8 +20,7 @@ class StatusItemController {
         NSImage(named: "StatusBarIconDot2Template")!,
         NSImage(named: "StatusBarIconDot3Template")!
     ]
-    private var animationImageIndex: Int = 0
-    private var animationTimer: Timer?
+    private var animationTask: Task<Void, Never>?
 
     init() {
         updateStatusItemImage()
@@ -42,20 +41,19 @@ class StatusItemController {
     }
 
     func startActivatingAnimation() {
-        guard animationTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            self.statusItem.button?.image = self.animationImages[self.animationImageIndex]
-            self.animationImageIndex = (self.animationImageIndex + 1) % self.animationImages.count
+        guard animationTask == nil else { return }
+        animationTask = Task { [weak self] in
+            var imageIndex = 0
+            while !Task.isCancelled, let images = self?.animationImages {
+                self?.statusItem.button?.image = images[imageIndex]
+                imageIndex = (imageIndex + 1) % images.count
+                try? await Task.sleep(for: .milliseconds(300))
+            }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        animationTimer = timer
     }
 
     func stopActivatingAnimation() {
-        guard let timer = self.animationTimer else { return }
-        timer.invalidate()
-        animationTimer = nil
-        animationImageIndex = 0
+        animationTask?.cancel()
+        animationTask = nil
     }
 }

@@ -77,9 +77,9 @@ class TunnelDetailTableViewController: NSViewController {
     private var tableViewModelRowsBySection = [[(isVisible: Bool, modelRow: TableViewModelRow)]]()
     private var tableViewModelRows = [TableViewModelRow]()
 
-    private var statusObservationToken: AnyObject?
+    private var statusObservationToken: ObservationToken?
     private var tunnelEditVC: TunnelEditViewController?
-    private var reloadRuntimeConfigurationTimer: Timer?
+    private var reloadRuntimeConfigurationTask: Task<Void, Never>?
 
     init(tunnelsManager: TunnelsManager, tunnel: TunnelContainer) {
         self.tunnelsManager = tunnelsManager
@@ -88,13 +88,11 @@ class TunnelDetailTableViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         updateTableViewModelRowsBySection()
         updateTableViewModelRows()
-        statusObservationToken = tunnel.observe(\TunnelContainer.status) { [weak self] _, _ in
-            guard let self = self else { return }
-            if tunnel.status == .active {
-                self.startUpdatingRuntimeConfiguration()
-            } else if tunnel.status == .inactive {
-                self.reloadRuntimeConfiguration()
-                self.stopUpdatingRuntimeConfiguration()
+        statusObservationToken = ObservationToken({ tunnel.status }) { [weak self] status in
+            if status == .active {
+                self?.startUpdatingRuntimeConfiguration()
+            } else if status == .inactive {
+                self?.stopUpdatingRuntimeConfiguration()
             }
         }
     }
@@ -328,19 +326,19 @@ class TunnelDetailTableViewController: NSViewController {
     }
 
     func startUpdatingRuntimeConfiguration() {
-        reloadRuntimeConfiguration()
-        reloadRuntimeConfigurationTimer?.invalidate()
-        let reloadTimer = Timer(timeInterval: 1 /* second */, repeats: true) { [weak self] _ in
-            self?.reloadRuntimeConfiguration()
+        reloadRuntimeConfigurationTask?.cancel()
+        reloadRuntimeConfigurationTask = Task { [weak self] in
+            while !Task.isCancelled, self != nil {
+                self?.reloadRuntimeConfiguration()
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
-        reloadRuntimeConfigurationTimer = reloadTimer
-        RunLoop.main.add(reloadTimer, forMode: .common)
     }
 
     func stopUpdatingRuntimeConfiguration() {
         reloadRuntimeConfiguration()
-        reloadRuntimeConfigurationTimer?.invalidate()
-        reloadRuntimeConfigurationTimer = nil
+        reloadRuntimeConfigurationTask?.cancel()
+        reloadRuntimeConfigurationTask = nil
     }
 
 }
@@ -391,12 +389,10 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
         cell.key = tr(format: "macFieldKey (%@)", tr("tunnelInterfaceStatus"))
         cell.value = TunnelDetailTableViewController.localizedStatusDescription(for: tunnel)
         cell.valueImage = TunnelDetailTableViewController.image(for: tunnel)
-        let changeHandler: (TunnelContainer, Any) -> Void = { [weak cell] tunnel, _ in
-            guard let cell = cell else { return }
-            cell.value = TunnelDetailTableViewController.localizedStatusDescription(for: tunnel)
-            cell.valueImage = TunnelDetailTableViewController.image(for: tunnel)
+        cell.statusObservationToken = ObservationToken({ [tunnel] in tunnel.status }) { [weak cell, tunnel] _ in
+            cell?.value = TunnelDetailTableViewController.localizedStatusDescription(for: tunnel)
+            cell?.valueImage = TunnelDetailTableViewController.image(for: tunnel)
         }
-        cell.statusObservationToken = tunnel.observe(\.status, changeHandler: changeHandler)
         return cell
     }
 
@@ -408,12 +404,10 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
         cell.onButtonClicked = { [weak self] in
             self?.handleToggleActiveStatusAction()
         }
-        let changeHandler: (TunnelContainer, Any) -> Void = { [weak cell] tunnel, _ in
-            guard let cell = cell else { return }
-            cell.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
-            cell.isButtonEnabled = (tunnel.status == .active || tunnel.status == .inactive)
+        cell.statusObservationToken = ObservationToken({ [tunnel] in tunnel.status }) { [weak cell, tunnel] status in
+            cell?.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
+            cell?.isButtonEnabled = (status == .active || status == .inactive)
         }
-        cell.statusObservationToken = tunnel.observe(\.status, changeHandler: changeHandler)
         return cell
     }
 

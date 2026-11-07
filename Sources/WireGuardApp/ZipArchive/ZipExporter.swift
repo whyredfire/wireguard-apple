@@ -11,33 +11,22 @@ enum ZipExporterError: WireGuardAppError {
     }
 }
 
-class ZipExporter {
-    static func exportConfigFiles(tunnelConfigurations: [TunnelConfiguration], to url: URL, completion: @escaping (WireGuardAppError?) -> Void) {
+@MainActor
+enum ZipExporter {
+    static func exportConfigFiles(tunnelConfigurations: [TunnelConfiguration], to url: URL) async throws(ZipArchiveError) {
+        var files: [(fileName: String, contents: Data)] = []
+        var lastTunnelName = ""
+        for tunnelConfiguration in tunnelConfigurations {
+            let name = tunnelConfiguration.name ?? "untitled"
+            if name.isEmpty || name == lastTunnelName { continue }
+            files.append((fileName: "\(name).conf", contents: Data(tunnelConfiguration.asWgQuickConfig().utf8)))
+            lastTunnelName = name
+        }
+        try await archive(files, to: url)
+    }
 
-        guard !tunnelConfigurations.isEmpty else {
-            completion(ZipExporterError.noTunnelsToExport)
-            return
-        }
-        DispatchQueue.global(qos: .userInitiated).async {
-            var inputsToArchiver: [(fileName: String, contents: Data)] = []
-            var lastTunnelName: String = ""
-            for tunnelConfiguration in tunnelConfigurations {
-                if let contents = tunnelConfiguration.asWgQuickConfig().data(using: .utf8) {
-                    let name = tunnelConfiguration.name ?? "untitled"
-                    if name.isEmpty || name == lastTunnelName { continue }
-                    inputsToArchiver.append((fileName: "\(name).conf", contents: contents))
-                    lastTunnelName = name
-                }
-            }
-            do {
-                try ZipArchive.archive(inputs: inputsToArchiver, to: url)
-            } catch let error as WireGuardAppError {
-                DispatchQueue.main.async { completion(error) }
-                return
-            } catch {
-                fatalError()
-            }
-            DispatchQueue.main.async { completion(nil) }
-        }
+    @concurrent
+    private static func archive(_ files: [(fileName: String, contents: Data)], to url: URL) async throws(ZipArchiveError) {
+        try ZipArchive.archive(inputs: files, to: url)
     }
 }

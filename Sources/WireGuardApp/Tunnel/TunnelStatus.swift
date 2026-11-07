@@ -3,7 +3,7 @@
 
 import Foundation
 
-@objc enum TunnelStatus: Int {
+enum TunnelStatus: Sendable {
     case inactive
     case activating
     case active

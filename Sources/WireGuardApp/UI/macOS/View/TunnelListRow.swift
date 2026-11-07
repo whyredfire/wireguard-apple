@@ -5,15 +5,18 @@ import Cocoa
 
 class TunnelListRow: NSView {
     var tunnel: TunnelContainer? {
-        didSet(value) {
-            // Bind to the tunnel's name
-            nameLabel.stringValue = tunnel?.name ?? ""
-            nameObservationToken = tunnel?.observe(\TunnelContainer.name) { [weak self] tunnel, _ in
-                self?.nameLabel.stringValue = tunnel.name
+        didSet {
+            guard let tunnel else {
+                nameObservationToken = nil
+                statusObservationToken = nil
+                return
             }
-            // Bind to the tunnel's status
+            nameLabel.stringValue = tunnel.name
             statusImageView.image = TunnelListRow.image(for: tunnel)
-            statusObservationToken = tunnel?.observe(\TunnelContainer.status) { [weak self] tunnel, _ in
+            nameObservationToken = ObservationToken({ tunnel.name }) { [weak self] name in
+                self?.nameLabel.stringValue = name
+            }
+            statusObservationToken = ObservationToken({ tunnel.status }) { [weak self] _ in
                 self?.statusImageView.image = TunnelListRow.image(for: tunnel)
             }
         }
@@ -31,8 +34,8 @@ class TunnelListRow: NSView {
 
     let statusImageView = NSImageView()
 
-    private var statusObservationToken: AnyObject?
-    private var nameObservationToken: AnyObject?
+    private var statusObservationToken: ObservationToken?
+    private var nameObservationToken: ObservationToken?
 
     init() {
         super.init(frame: CGRect.zero)

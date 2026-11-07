@@ -28,7 +28,7 @@ enum ZipArchive {}
 
 extension ZipArchive {
 
-    static func archive(inputs: [(fileName: String, contents: Data)], to destinationURL: URL) throws {
+    static func archive(inputs: [(fileName: String, contents: Data)], to destinationURL: URL) throws(ZipArchiveError) {
         let destinationPath = destinationURL.path
         guard let zipFile = zipOpen(destinationPath, APPEND_STATUS_CREATE) else {
             throw ZipArchiveError.cantOpenOutputZipFileForWriting
@@ -45,7 +45,7 @@ extension ZipArchive {
         zipClose(zipFile, nil)
     }
 
-    static func unarchive(url: URL, requiredFileExtensions: [String]) throws -> [(fileBaseName: String, contents: Data)] {
+    static func unarchive(url: URL, requiredFileExtensions: [String]) throws(ZipArchiveError) -> [(fileBaseName: String, contents: Data)] {
 
         var results = [(fileBaseName: String, contents: Data)]()
         let requiredFileExtensionsLowercased = requiredFileExtensions.map { $0.lowercased() }

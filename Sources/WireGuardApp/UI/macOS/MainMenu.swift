@@ -5,26 +5,18 @@ import Cocoa
 
 // swiftlint:disable colon
 
-class MainMenu: NSMenu {
-    init() {
-        super.init(title: "")
-        addSubmenu(createApplicationMenu())
-        addSubmenu(createFileMenu())
-        addSubmenu(createEditMenu())
-        addSubmenu(createTunnelMenu())
-        addSubmenu(createWindowMenu())
+@MainActor
+enum MainMenu {
+    static func make() -> NSMenu {
+        let menu = NSMenu(title: "")
+        for submenu in [createApplicationMenu(), createFileMenu(), createEditMenu(), createTunnelMenu(), createWindowMenu()] {
+            let menuItem = menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
+            menu.setSubmenu(submenu, for: menuItem)
+        }
+        return menu
     }
 
-    required init(coder decoder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    private func addSubmenu(_ menu: NSMenu) {
-        let menuItem = self.addItem(withTitle: "", action: nil, keyEquivalent: "")
-        self.setSubmenu(menu, for: menuItem)
-    }
-
-    private func createApplicationMenu() -> NSMenu {
+    private static func createApplicationMenu() -> NSMenu {
         let menu = NSMenu()
 
         let aboutMenuItem = menu.addItem(withTitle: tr("macMenuAbout"),
@@ -57,7 +49,7 @@ class MainMenu: NSMenu {
         return menu
     }
 
-    private func createFileMenu() -> NSMenu {
+    private static func createFileMenu() -> NSMenu {
         let menu = NSMenu(title: tr("macMenuFile"))
 
         menu.addItem(withTitle: tr("macMenuAddEmptyTunnel"),
@@ -77,7 +69,7 @@ class MainMenu: NSMenu {
         return menu
     }
 
-    private func createEditMenu() -> NSMenu {
+    private static func createEditMenu() -> NSMenu {
         let menu = NSMenu(title: tr("macMenuEdit"))
 
         menu.addItem(withTitle: "", action: #selector(UndoActionRespondable.undo(_:)), keyEquivalent:"z")
@@ -96,7 +88,7 @@ class MainMenu: NSMenu {
         return menu
     }
 
-    private func createTunnelMenu() -> NSMenu {
+    private static func createTunnelMenu() -> NSMenu {
         let menu = NSMenu(title: tr("macMenuTunnel"))
 
         menu.addItem(withTitle: tr("macMenuToggleStatus"), action: #selector(TunnelDetailTableViewController.handleToggleActiveStatusAction), keyEquivalent:"t")
@@ -109,7 +101,7 @@ class MainMenu: NSMenu {
         return menu
     }
 
-    private func createWindowMenu() -> NSMenu {
+    private static func createWindowMenu() -> NSMenu {
         let menu = NSMenu(title: tr("macMenuWindow"))
 
         menu.addItem(withTitle: tr("macMenuMinimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent:"m")

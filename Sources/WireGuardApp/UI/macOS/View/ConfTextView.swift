@@ -2,16 +2,18 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Cocoa
+import Observation
 
+@Observable
 class ConfTextView: NSTextView {
 
-    private let confTextStorage = ConfTextStorage()
+    @ObservationIgnored private let confTextStorage = ConfTextStorage()
 
-    @objc dynamic var hasError = false
-    @objc dynamic var privateKeyString: String?
-    @objc dynamic var singlePeerAllowedIPs: [String]?
+    var hasError = false
+    var privateKeyString: String?
+    var singlePeerAllowedIPs: [String]?
 
-    override var string: String {
+    @ObservationIgnored override var string: String {
         didSet {
             confTextStorage.highlightSyntax()
             updateConfigData()

@@ -1,36 +1,28 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
-import Foundation
-import LocalAuthentication
-#if os(macOS)
 import AppKit
-#endif
+import LocalAuthentication
 
-class PrivateDataConfirmation {
-    static func confirmAccess(to reason: String, _ after: @escaping () -> Void) {
+@MainActor
+enum PrivateDataConfirmation {
+    static func confirmAccess(to reason: String, _ after: @escaping @MainActor () -> Void) {
         let context = LAContext()
-
         var error: NSError?
-        if !context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
-            guard let error = error as? LAError else { return }
-            if error.code == .passcodeNotSet {
-                // We give no protection to folks who just don't set a passcode.
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            // We give no protection to folks who just don't set a passcode.
+            if (error as? LAError)?.code == .passcodeNotSet {
                 after()
             }
             return
         }
-
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
-            DispatchQueue.main.async {
-                #if os(macOS)
-                if !NSApp.isActive {
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-                #endif
-                if success {
-                    after()
-                }
+        Task {
+            let success = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+            if !NSApp.isActive {
+                NSApp.activate()
+            }
+            if success {
+                after()
             }
         }
     }

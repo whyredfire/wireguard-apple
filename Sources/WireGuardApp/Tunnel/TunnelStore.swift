@@ -12,11 +12,9 @@ enum TunnelStore {
         var isSplitDNSEnabled: Bool
     }
 
-    private static let query: [CFString: Any] = [
-        kSecClass: kSecClassGenericPassword,
-        kSecAttrService: Bundle.main.bundleIdentifier!,
-        kSecAttrAccount: "tunnels"
-    ]
+    private static var query: [CFString: Any] {
+        [kSecClass: kSecClassGenericPassword, kSecAttrService: Bundle.main.bundleIdentifier!, kSecAttrAccount: "tunnels"]
+    }
 
     static func load() throws -> [String: Tunnel] {
         var query = self.query

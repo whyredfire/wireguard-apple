@@ -294,22 +294,19 @@ class TunnelMenuItem: NSMenuItem {
 
     var tunnel: TunnelContainer
 
-    private var statusObservationToken: AnyObject?
-    private var nameObservationToken: AnyObject?
+    private var statusObservationToken: ObservationToken?
+    private var nameObservationToken: ObservationToken?
 
     init(tunnel: TunnelContainer, action selector: Selector?) {
         self.tunnel = tunnel
         super.init(title: tunnel.name, action: selector, keyEquivalent: "")
         updateStatus()
-        let statusObservationToken = tunnel.observe(\.status) { [weak self] _, _ in
+        statusObservationToken = ObservationToken({ tunnel.status }) { [weak self] _ in
             self?.updateStatus()
         }
-        updateTitle()
-        let nameObservationToken = tunnel.observe(\TunnelContainer.name) { [weak self] _, _ in
+        nameObservationToken = ObservationToken({ tunnel.name }) { [weak self] _ in
             self?.updateTitle()
         }
-        self.statusObservationToken = statusObservationToken
-        self.nameObservationToken = nameObservationToken
     }
 
     required init(coder decoder: NSCoder) {

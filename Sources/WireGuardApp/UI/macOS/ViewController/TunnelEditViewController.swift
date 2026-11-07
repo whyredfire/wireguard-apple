@@ -3,6 +3,7 @@
 
 import Cocoa
 
+@MainActor
 protocol TunnelEditViewControllerDelegate: AnyObject {
     func tunnelSaved(tunnel: TunnelContainer)
     func tunnelEditingCancelled()
@@ -90,9 +91,9 @@ class TunnelEditViewController: NSViewController {
 
     weak var delegate: TunnelEditViewControllerDelegate?
 
-    var privateKeyObservationToken: AnyObject?
-    var hasErrorObservationToken: AnyObject?
-    var singlePeerAllowedIPsObservationToken: AnyObject?
+    var privateKeyObservationToken: ObservationToken?
+    var hasErrorObservationToken: ObservationToken?
+    var singlePeerAllowedIPsObservationToken: ObservationToken?
 
     var dnsServersAddedToAllowedIPs: String?
 
@@ -127,19 +128,15 @@ class TunnelEditViewController: NSViewController {
             updateExcludePrivateIPsVisibility(singlePeerAllowedIPs: nil)
             dnsServersAddedToAllowedIPs = nil
         }
-        privateKeyObservationToken = textView.observe(\.privateKeyString) { [weak publicKeyRow] textView, _ in
-            if let privateKeyString = textView.privateKeyString,
-               let privateKey = PrivateKey(base64Key: privateKeyString) {
-                publicKeyRow?.value = privateKey.publicKey.base64Key
-            } else {
-                publicKeyRow?.value = ""
-            }
+        let textView = textView
+        privateKeyObservationToken = ObservationToken({ textView.privateKeyString }) { [weak publicKeyRow] privateKeyString in
+            publicKeyRow?.value = privateKeyString.flatMap { PrivateKey(base64Key: $0) }?.publicKey.base64Key ?? ""
         }
-        hasErrorObservationToken = textView.observe(\.hasError) { [weak saveButton] textView, _ in
-            saveButton?.isEnabled = !textView.hasError
+        hasErrorObservationToken = ObservationToken({ textView.hasError }) { [weak saveButton] hasError in
+            saveButton?.isEnabled = !hasError
         }
-        singlePeerAllowedIPsObservationToken = textView.observe(\.singlePeerAllowedIPs) { [weak self] textView, _ in
-            self?.updateExcludePrivateIPsVisibility(singlePeerAllowedIPs: textView.singlePeerAllowedIPs)
+        singlePeerAllowedIPsObservationToken = ObservationToken({ textView.singlePeerAllowedIPs }) { [weak self] allowedIPs in
+            self?.updateExcludePrivateIPsVisibility(singlePeerAllowedIPs: allowedIPs)
         }
     }
 

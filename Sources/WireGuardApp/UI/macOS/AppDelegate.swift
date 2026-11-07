@@ -5,6 +5,7 @@ import Cocoa
 import ServiceManagement
 
 @main
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     var tunnelsManager: TunnelsManager?
@@ -26,7 +27,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        Logger.configureGlobal(tagged: "APP", withFilePath: FileManager.logFileURL?.path)
+        let info = Bundle.main.infoDictionary
+        wg_log(.info, message: "App version: \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))")
         let isLaunchedAtLogin = isLaunchingAtLogin
         if SMAppService.mainApp.status == .notRegistered {
             do {
@@ -36,7 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        NSApp.mainMenu = MainMenu()
+        NSApp.mainMenu = MainMenu.make()
         setDockIconAndMainMenuVisibility(isVisible: !isLaunchedAtLogin)
 
         TunnelsManager.create { [weak self] result in
@@ -99,7 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: tr("macConfirmAndQuitAlertCloseWindow"))
         alert.addButton(withTitle: tr("macConfirmAndQuitAlertQuitWireGuard"))
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         if let manageWindow = manageTunnelsWindowObject {
             manageWindow.orderFront(self)
             alert.beginSheetModal(for: manageWindow) { response in
@@ -117,7 +119,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func quit() {
         if let manageWindow = manageTunnelsWindowObject, manageWindow.attachedSheet != nil {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             manageWindow.orderFront(self)
             return
         }
@@ -142,7 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let newActivationPolicy: NSApplication.ActivationPolicy = isVisible ? .regular : .accessory
         guard currentActivationPolicy != newActivationPolicy else {
             if newActivationPolicy == .regular {
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
             }
             completion?()
             return
@@ -154,14 +156,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // setActivationPolicy(.prohibited).
             onAppDeactivation = {
                 NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
                 completion?()
             }
             NSApp.setActivationPolicy(.prohibited)
         } else {
             NSApp.setActivationPolicy(newActivationPolicy)
             if newActivationPolicy == .regular {
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
             }
             completion?()
         }
@@ -184,7 +186,7 @@ extension AppDelegate {
             tr(format: "macAppVersion (%@)", appVersion),
             tr(format: "macGoBackendVersion (%@)", goBackendVersion)
         ].joined(separator: "\n")
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationVersion: appVersionString,
             .version: "",

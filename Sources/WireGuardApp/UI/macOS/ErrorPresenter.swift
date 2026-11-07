@@ -3,14 +3,14 @@
 
 import Cocoa
 
-class ErrorPresenter: ErrorPresenterProtocol {
+enum ErrorPresenter: ErrorPresenterProtocol {
     static func showErrorAlert(title: String, message: String, from sourceVC: AnyObject?, onPresented: (() -> Void)?, onDismissal: (() -> Void)?) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         onPresented?()
         if let sourceVC = sourceVC as? NSViewController {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             sourceVC.view.window!.makeKeyAndOrderFront(nil)
             alert.beginSheetModal(for: sourceVC.view.window!) { _ in
                 onDismissal?()
@@ -20,7 +20,7 @@ class ErrorPresenter: ErrorPresenterProtocol {
             // not the active app. A modal alert shown while inactive comes up
             // behind other windows with no way to reach it, freezing the app
             // until it is dismissed. Activate first so the alert is visible.
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             alert.runModal()
             onDismissal?()
         }

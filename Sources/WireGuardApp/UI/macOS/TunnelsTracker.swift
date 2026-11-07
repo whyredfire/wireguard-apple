@@ -24,7 +24,7 @@ class TunnelsTracker {
     weak var manageTunnelsRootVC: ManageTunnelsRootViewController?
 
     private var tunnelsManager: TunnelsManager
-    private var tunnelStatusObservers = [AnyObject]()
+    private var tunnelStatusObservers = [ObservationToken]()
     private(set) var tunnelsInOperation: [TunnelContainer] {
         didSet {
             statusMenu?.tunnelsInOperation = tunnelsInOperation
@@ -46,9 +46,9 @@ class TunnelsTracker {
         tunnelsManager.activationDelegate = self
     }
 
-    func observeStatus(of tunnel: TunnelContainer) -> AnyObject {
-        return tunnel.observe(\.status) { [weak self] _, _ in
-            guard let self = self else { return }
+    func observeStatus(of tunnel: TunnelContainer) -> ObservationToken {
+        return ObservationToken({ tunnel.status }) { [weak self] _ in
+            guard let self else { return }
             // Always reassign, so that observers get to update their
             // presentation even when the set of tunnels doesn't change.
             self.tunnelsInOperation = self.tunnelsManager.tunnelsInOperation()

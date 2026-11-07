@@ -28,7 +28,7 @@ class ButtonRow: NSView {
     }
 
     var onButtonClicked: (() -> Void)?
-    var statusObservationToken: AnyObject?
+    var statusObservationToken: ObservationToken?
 
     override var intrinsicContentSize: NSSize {
         return NSSize(width: NSView.noIntrinsicMetric, height: button.intrinsicContentSize.height)

@@ -2,6 +2,7 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Foundation
+import Observation
 
 @MainActor
 protocol TunnelsManagerListDelegate: AnyObject {
@@ -275,14 +276,14 @@ class TunnelsManager {
     }
 }
 
-@MainActor
+@MainActor @Observable
 class TunnelContainer: NSObject {
-    @objc dynamic var name: String
-    @objc dynamic var status: TunnelStatus = .inactive
+    var name: String
+    var status: TunnelStatus = .inactive
 
-    fileprivate(set) var tunnelConfiguration: TunnelConfiguration?
-    fileprivate(set) var isSplitDNSEnabled: Bool
-    fileprivate weak var manager: TunnelsManager?
+    @ObservationIgnored fileprivate(set) var tunnelConfiguration: TunnelConfiguration?
+    @ObservationIgnored fileprivate(set) var isSplitDNSEnabled: Bool
+    @ObservationIgnored fileprivate weak var manager: TunnelsManager?
 
     fileprivate init(configuration: TunnelConfiguration, isSplitDNSEnabled: Bool) {
         name = configuration.name ?? "Unnamed"

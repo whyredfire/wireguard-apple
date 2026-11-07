@@ -3,16 +3,9 @@
 
 import Foundation
 
-public class LogViewHelper {
-    var log: OpaquePointer
-    var cursor: UInt32 = UINT32_MAX
-    static let formatOptions: ISO8601DateFormatter.Options = [
-        .withYear, .withMonth, .withDay, .withTime,
-        .withDashSeparatorInDate, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime,
-        .withFractionalSeconds
-    ]
-
-    struct LogEntry {
+/// Reads the app's log, from where the previous read stopped.
+actor LogViewHelper {
+    struct LogEntry: Sendable {
         let timestamp: String
         let message: String
 
@@ -21,37 +14,36 @@ public class LogViewHelper {
         }
     }
 
-    class LogEntries {
-        var entries: [LogEntry] = []
-    }
+    private static let formatOptions: ISO8601DateFormatter.Options = [
+        .withYear, .withMonth, .withDay, .withTime,
+        .withDashSeparatorInDate, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime,
+        .withFractionalSeconds
+    ]
+
+    private let log: OpaquePointer
+    private var cursor: UInt32 = UINT32_MAX
 
     init?(logFilePath: String?) {
-        guard let logFilePath = logFilePath else { return nil }
-        guard let log = open_log(logFilePath) else { return nil }
+        guard let logFilePath, let log = open_log(logFilePath) else { return nil }
         self.log = log
     }
 
-    deinit {
-        close_log(self.log)
+    isolated deinit {
+        close_log(log)
     }
 
-    func fetchLogEntriesSinceLastFetch(completion: @escaping ([LogViewHelper.LogEntry]) -> Void) {
-        let logEntries = LogEntries()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let newCursor = view_lines_from_cursor(self.log, self.cursor, Unmanaged.passUnretained(logEntries).toOpaque()) { cStr, timestamp, ctx in
-                let message = cStr != nil ? String(cString: cStr!) : ""
-                let date = Date(timeIntervalSince1970: Double(timestamp) / 1000000000)
-                let dateString = ISO8601DateFormatter.string(from: date, timeZone: TimeZone.current, formatOptions: LogViewHelper.formatOptions)
-                if let ctx = ctx {
-                    Unmanaged<LogEntries>.fromOpaque(ctx).takeUnretainedValue().entries.append(LogEntry(timestamp: dateString, message: message))
-                }
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.cursor = newCursor
-                completion(logEntries.entries)
-            }
+    func fetchNewEntries() -> [LogEntry] {
+        final class Entries {
+            var entries: [LogEntry] = []
         }
+        let entries = Entries()
+        cursor = view_lines_from_cursor(log, cursor, Unmanaged.passUnretained(entries).toOpaque()) { cString, timestamp, context in
+            guard let context else { return }
+            let message = cString.map { String(cString: $0) } ?? ""
+            let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000_000_000)
+            let dateString = ISO8601DateFormatter.string(from: date, timeZone: .current, formatOptions: LogViewHelper.formatOptions)
+            Unmanaged<Entries>.fromOpaque(context).takeUnretainedValue().entries.append(LogEntry(timestamp: dateString, message: message))
+        }
+        return entries.entries
     }
 }

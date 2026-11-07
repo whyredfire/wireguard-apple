@@ -47,6 +47,5 @@ let package = Package(
                 "UI/macOS/Info.plist"
             ]
         )
-    ],
-    swiftLanguageModes: [.v5]
+    ]
 )
