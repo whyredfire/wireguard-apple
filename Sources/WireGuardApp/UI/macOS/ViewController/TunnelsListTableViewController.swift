@@ -42,7 +42,7 @@ class TunnelsListTableViewController: NSViewController {
 
     let removeButton: NSButton = {
         let image = NSImage(named: NSImage.removeTemplateName)!
-        let button = NSButton(image: image, target: self, action: #selector(handleRemoveTunnelAction))
+        let button = NSButton(image: image, target: nil, action: #selector(handleRemoveTunnelAction))
         button.bezelStyle = .smallSquare
         button.imagePosition = .imageOnly
         return button
@@ -136,6 +136,7 @@ class TunnelsListTableViewController: NSViewController {
         addButton.menu?.items.forEach { $0.target = self }
         actionButton.menu?.items.forEach { $0.target = self }
 
+        removeButton.target = self
         view = containerView
     }
 
