@@ -64,3 +64,19 @@ func TestResolveEndpoints(t *testing.T) {
 		t.Error("failed initial resolution: no error")
 	}
 }
+
+func TestRingLogSince(t *testing.T) {
+	r := &ringLog{}
+	for i := 0; i < 2005; i++ {
+		r.Write([]byte("line\n"))
+	}
+	entries, cursor := r.since(0)
+	if len(entries) != 2000 || cursor != 2005 {
+		t.Fatalf("since(0) = %d entries, cursor %d; want 2000, 2005", len(entries), cursor)
+	}
+	r.Write([]byte("new\n"))
+	entries, cursor = r.since(cursor)
+	if len(entries) != 1 || entries[0].Message != "new" || cursor != 2006 {
+		t.Fatalf("since(2005) = %v, cursor %d; want [new], 2006", entries, cursor)
+	}
+}

@@ -200,7 +200,7 @@ class TunnelsListTableViewController: NSViewController {
     }
 
     @objc func handleViewLogAction() {
-        let logVC = LogViewController()
+        let logVC = LogViewController(tunnelsManager: tunnelsManager)
         self.presentAsSheet(logVC)
     }
 

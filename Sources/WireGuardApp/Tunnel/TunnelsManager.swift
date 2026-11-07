@@ -232,8 +232,11 @@ class TunnelsManager {
         }
     }
 
-    func helperLog() async -> [String] {
-        (try? await helper?.request("log").log) ?? []
+    /// The helper's log entries after the first `cursor` ones, and the new cursor.
+    func helperLog(since cursor: Int) async -> (entries: [LogViewHelper.LogEntry], cursor: Int) {
+        guard let response = try? await helper?.request("log", cursor: cursor) else { return ([], cursor) }
+        let entries = (response.log ?? []).map { LogViewHelper.LogEntry(timestamp: $0.time, message: "[HELPER] " + $0.message) }
+        return (entries, response.cursor ?? cursor)
     }
 
     private func save() throws {

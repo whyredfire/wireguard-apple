@@ -76,14 +76,17 @@ class LogViewController: NSViewController {
         return button
     }()
 
+    let tunnelsManager: TunnelsManager
     let logViewHelper: LogViewHelper?
+    private var helperLogCursor = 0
     var logEntries = [LogViewHelper.LogEntry]()
     var isFetchingLogEntries = false
     var isInScrolledToEndMode = true
 
     private var updateLogEntriesTimer: Timer?
 
-    init() {
+    init(tunnelsManager: TunnelsManager) {
+        self.tunnelsManager = tunnelsManager
         logViewHelper = LogViewHelper(logFilePath: FileManager.logFileURL?.path)
         super.init(nibName: nil, bundle: nil)
     }
@@ -165,20 +168,35 @@ class LogViewController: NSViewController {
     func updateLogEntries() {
         guard !isFetchingLogEntries else { return }
         isFetchingLogEntries = true
-        logViewHelper?.fetchLogEntriesSinceLastFetch { [weak self] fetchedLogEntries in
-            guard let self = self else { return }
-            defer {
-                self.isFetchingLogEntries = false
-            }
-            if !self.progressIndicator.isHidden {
-                self.progressIndicator.stopAnimation(self)
-                self.saveButton.isEnabled = true
-            }
-            guard !fetchedLogEntries.isEmpty else { return }
-            let oldCount = self.logEntries.count
-            self.logEntries.append(contentsOf: fetchedLogEntries)
-            self.tableView.insertRows(at: IndexSet(integersIn: oldCount ..< oldCount + fetchedLogEntries.count), withAnimation: .slideDown)
+        guard let logViewHelper else {
+            appendHelperLog(merging: [])
+            return
         }
+        logViewHelper.fetchLogEntriesSinceLastFetch { [weak self] appLogEntries in
+            self?.appendHelperLog(merging: appLogEntries)
+        }
+    }
+
+    private func appendHelperLog(merging appLogEntries: [LogViewHelper.LogEntry]) {
+        Task {
+            let (helperLogEntries, cursor) = await tunnelsManager.helperLog(since: helperLogCursor)
+            helperLogCursor = cursor
+            append((appLogEntries + helperLogEntries).sorted { $0.timestamp < $1.timestamp })
+        }
+    }
+
+    private func append(_ fetchedLogEntries: [LogViewHelper.LogEntry]) {
+        defer {
+            isFetchingLogEntries = false
+        }
+        if !progressIndicator.isHidden {
+            progressIndicator.stopAnimation(self)
+            saveButton.isEnabled = true
+        }
+        guard !fetchedLogEntries.isEmpty else { return }
+        let oldCount = logEntries.count
+        logEntries.append(contentsOf: fetchedLogEntries)
+        tableView.insertRows(at: IndexSet(integersIn: oldCount ..< oldCount + fetchedLogEntries.count), withAnimation: .slideDown)
     }
 
     func startUpdatingLogEntries() {

@@ -23,14 +23,20 @@ enum HelperError: LocalizedError {
 /// responses, one per line, answered in order.
 actor HelperClient {
     static let socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
-    static let version = "1"
+    static let version = "2"
 
     struct Response: Decodable, Sendable {
         var error: String?
         var version: String?
         var interface: String?
         var runtime: String?
-        var log: [String]?
+        var log: [LogLine]?
+        var cursor: Int?
+    }
+
+    struct LogLine: Decodable, Sendable {
+        var time: String
+        var message: String
     }
 
     private let fd: Int32
@@ -116,14 +122,15 @@ actor HelperClient {
     }
 
     @discardableResult
-    func request(_ op: String, name: String? = nil, config: HelperTunnelConfig? = nil) async throws -> Response {
+    func request(_ op: String, name: String? = nil, config: HelperTunnelConfig? = nil, cursor: Int? = nil) async throws -> Response {
         struct Request: Encodable {
             var op: String
             var name: String?
             var config: HelperTunnelConfig?
+            var cursor: Int?
         }
         guard isConnected else { throw HelperError.disconnected }
-        var line = try JSONEncoder().encode(Request(op: op, name: name, config: config))
+        var line = try JSONEncoder().encode(Request(op: op, name: name, config: config, cursor: cursor))
         line.append(UInt8(ascii: "\n"))
         let response = try await withCheckedThrowingContinuation { continuation in
             pending.append(continuation)

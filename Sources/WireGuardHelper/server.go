@@ -20,14 +20,16 @@ type request struct {
 	Op     string `json:"op"`
 	Name   string `json:"name,omitempty"`
 	Config Config `json:"config,omitempty"`
+	Cursor int    `json:"cursor,omitempty"`
 }
 
 type response struct {
-	Error     string   `json:"error,omitempty"`
-	Version   string   `json:"version,omitempty"`
-	Interface string   `json:"interface,omitempty"`
-	Runtime   string   `json:"runtime,omitempty"`
-	Log       []string `json:"log,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	Version   string     `json:"version,omitempty"`
+	Interface string     `json:"interface,omitempty"`
+	Runtime   string     `json:"runtime,omitempty"`
+	Log       []logEntry `json:"log,omitempty"`
+	Cursor    int        `json:"cursor,omitempty"`
 }
 
 type server struct {
@@ -125,7 +127,7 @@ func (s *server) do(req request, resp *response, started map[string]bool) error 
 		}
 		resp.Runtime = config
 	case "log":
-		resp.Log = s.log.lines()
+		resp.Log, resp.Cursor = s.log.since(req.Cursor)
 	default:
 		return errors.New("unknown operation " + req.Op)
 	}

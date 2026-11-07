@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"wireguard-helper/internal/bind"
 	"wireguard-helper/internal/tailscale/dns"
@@ -19,7 +21,7 @@ import (
 )
 
 const (
-	version    = "1"
+	version    = "2"
 	socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
 )
 
@@ -33,7 +35,7 @@ func main() {
 	}
 
 	ring := &ringLog{}
-	logger := log.New(ring, "", log.LstdFlags)
+	logger := log.New(ring, "", 0)
 	logf := logger.Printf
 
 	if err := dns.RemoveStale(logf); err != nil {
@@ -48,25 +50,34 @@ func main() {
 	log.Fatal(s.serve(socketPath))
 }
 
-// ringLog writes to stderr and keeps the last lines for the app's log view.
+type logEntry struct {
+	Time    string `json:"time"`
+	Message string `json:"message"`
+}
+
+// ringLog writes to stderr and keeps the last entries for the app's log view.
 type ringLog struct {
-	mu  sync.Mutex
-	buf []string
+	mu      sync.Mutex
+	entries []logEntry
+	total   int
 }
 
 func (r *ringLog) Write(p []byte) (int, error) {
 	os.Stderr.Write(p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.buf = append(r.buf, string(p))
-	if len(r.buf) > 2000 {
-		r.buf = r.buf[len(r.buf)-2000:]
+	r.entries = append(r.entries, logEntry{time.Now().Format("2006-01-02 15:04:05.000"), strings.TrimSuffix(string(p), "\n")})
+	r.total++
+	if len(r.entries) > 2000 {
+		r.entries = r.entries[len(r.entries)-2000:]
 	}
 	return len(p), nil
 }
 
-func (r *ringLog) lines() []string {
+// since returns the entries written after the first cursor ones, and the new cursor.
+func (r *ringLog) since(cursor int) ([]logEntry, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]string(nil), r.buf...)
+	first := r.total - len(r.entries)
+	return append([]logEntry(nil), r.entries[max(cursor-first, 0):]...), r.total
 }
