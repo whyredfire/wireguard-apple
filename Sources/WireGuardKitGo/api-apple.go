@@ -59,14 +59,15 @@ type tunnelHandle struct {
 var tunnelHandles = make(map[int32]tunnelHandle)
 
 func init() {
-	signals := make(chan os.Signal)
+	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, unix.SIGUSR2)
 	go func() {
 		buf := make([]byte, os.Getpagesize())
 		for {
 			select {
 			case <-signals:
-				n := runtime.Stack(buf, true)
+				// A full dump fills the slice; leave room for the NUL.
+				n := runtime.Stack(buf[:len(buf)-1], true)
 				buf[n] = 0
 				if uintptr(loggerFunc) != 0 {
 					C.callLogger(loggerFunc, loggerCtx, 0, (*C.char)(unsafe.Pointer(&buf[0])))
