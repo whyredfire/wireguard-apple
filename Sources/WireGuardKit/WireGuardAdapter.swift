@@ -530,8 +530,6 @@ public class WireGuardAdapter {
         }
     }
 
-    /// Helper method used by network path monitor.
-    /// - Parameter path: new network path
     #if os(macOS)
     /// Schedule resetting the peer endpoints to their configured addresses,
     /// re-resolving the ones configured with a hostname.
@@ -567,6 +565,8 @@ public class WireGuardAdapter {
     }
     #endif
 
+    /// Helper method used by network path monitor.
+    /// - Parameter path: new network path
     private func didReceivePathUpdate(path: Network.NWPath) {
         self.logHandler(.verbose, "Network change detected with \(path.status) route and interface order \(path.availableInterfaces)")
 
