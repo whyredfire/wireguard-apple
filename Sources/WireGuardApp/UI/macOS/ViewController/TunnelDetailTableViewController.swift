@@ -43,6 +43,7 @@ class TunnelDetailTableViewController: NSViewController {
         tableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TunnelDetail")))
         tableView.headerView = nil
         tableView.rowSizeStyle = .medium
+        tableView.usesAutomaticRowHeights = true
         tableView.backgroundColor = .clear
         tableView.selectionHighlightStyle = .none
         return tableView
@@ -393,7 +394,9 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
             cell.isKeyInBold = modelRow.isTitleRow()
             return cell
         case .spacerRow:
-            return NSView()
+            let spacer = NSView()
+            spacer.heightAnchor.constraint(equalToConstant: tableView.rowHeight).isActive = true
+            return spacer
         }
     }
 

@@ -314,7 +314,8 @@ class TunnelViewModel {
             if let endpoint = config.endpoint {
                 scratchpad[.endpoint] = endpoint.stringRepresentation
             }
-            if let persistentKeepAlive = config.persistentKeepAlive {
+            // 0 turns the keepalive off, as when reading the runtime configuration.
+            if let persistentKeepAlive = config.persistentKeepAlive, persistentKeepAlive != 0 {
                 scratchpad[.persistentKeepAlive] = String(persistentKeepAlive)
             }
             if let rxBytes = config.rxBytes {

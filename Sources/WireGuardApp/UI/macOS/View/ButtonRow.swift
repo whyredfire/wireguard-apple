@@ -45,7 +45,7 @@ class ButtonRow: NSView {
 
         NSLayoutConstraint.activate([
             button.centerYAnchor.constraint(equalTo: self.centerYAnchor),
-            button.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 155),
+            button.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: EditableKeyValueRow.keyWidth + 5),
             button.widthAnchor.constraint(greaterThanOrEqualToConstant: 100)
         ])
     }

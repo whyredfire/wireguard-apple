@@ -9,7 +9,7 @@ class EditableKeyValueRow: NSView {
         keyLabel.isEditable = false
         keyLabel.isSelectable = false
         keyLabel.isBordered = false
-        keyLabel.alignment = .right
+        keyLabel.alignment = .left
         keyLabel.maximumNumberOfLines = 1
         keyLabel.lineBreakMode = .byTruncatingTail
         keyLabel.backgroundColor = .clear
@@ -19,8 +19,9 @@ class EditableKeyValueRow: NSView {
     let valueLabel: NSTextField = {
         let valueLabel = NSTextField()
         valueLabel.isSelectable = true
-        valueLabel.maximumNumberOfLines = 1
-        valueLabel.lineBreakMode = .byTruncatingTail
+        // Long values, like many allowed IPs, continue on the next lines.
+        valueLabel.maximumNumberOfLines = 0
+        valueLabel.lineBreakMode = .byWordWrapping
         return valueLabel
     }()
 
@@ -51,11 +52,6 @@ class EditableKeyValueRow: NSView {
 
     var statusObservationToken: ObservationToken?
 
-    override var intrinsicContentSize: NSSize {
-        let height = max(keyLabel.intrinsicContentSize.height, valueLabel.intrinsicContentSize.height)
-        return NSSize(width: NSView.noIntrinsicMetric, height: height)
-    }
-
     convenience init() {
         self.init(hasValueImage: false)
     }
@@ -69,8 +65,11 @@ class EditableKeyValueRow: NSView {
         keyLabel.translatesAutoresizingMaskIntoConstraints = false
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        // The row is as tall as its value, with the spacing of a medium table row.
+        let verticalPadding: CGFloat = 4
         NSLayoutConstraint.activate([
-            keyLabel.centerYAnchor.constraint(equalTo: self.centerYAnchor),
+            valueLabel.topAnchor.constraint(equalTo: self.topAnchor, constant: verticalPadding),
+            self.bottomAnchor.constraint(equalTo: valueLabel.bottomAnchor, constant: verticalPadding),
             keyLabel.firstBaselineAnchor.constraint(equalTo: valueLabel.firstBaselineAnchor),
             self.leadingAnchor.constraint(equalTo: keyLabel.leadingAnchor),
             valueLabel.trailingAnchor.constraint(equalTo: self.trailingAnchor)
@@ -81,7 +80,7 @@ class EditableKeyValueRow: NSView {
             addSubview(valueImageView)
             valueImageView.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                valueImageView.centerYAnchor.constraint(equalTo: self.centerYAnchor),
+                valueImageView.centerYAnchor.constraint(equalTo: valueLabel.centerYAnchor),
                 valueImageView.leadingAnchor.constraint(equalTo: keyLabel.trailingAnchor, constant: spacing),
                 valueLabel.leadingAnchor.constraint(equalTo: valueImageView.trailingAnchor)
             ])
@@ -94,14 +93,25 @@ class EditableKeyValueRow: NSView {
         keyLabel.setContentCompressionResistancePriority(.defaultHigh + 2, for: .horizontal)
         keyLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         valueLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // Wraps within the row instead of widening it.
+        valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let widthConstraint = keyLabel.widthAnchor.constraint(equalToConstant: 150)
+        let widthConstraint = keyLabel.widthAnchor.constraint(equalToConstant: Self.keyWidth)
         widthConstraint.priority = .defaultHigh + 1
         widthConstraint.isActive = true
     }
 
     required init?(coder decoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        // A wrapping label only knows its height once it knows its width.
+        if valueLabel.preferredMaxLayoutWidth != valueLabel.frame.width {
+            valueLabel.preferredMaxLayoutWidth = valueLabel.frame.width
+            super.layout()
+        }
     }
 
     override func prepareForReuse() {
@@ -136,4 +146,20 @@ class KeyValueImageRow: EditableKeyValueRow {
     required init?(coder decoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+}
+
+extension EditableKeyValueRow {
+    /// Fits every key a tunnel can show, so the values line up in one column whichever tunnel is shown.
+    static let keyWidth: CGFloat = {
+        let interfaceKeys = TunnelViewModel.InterfaceField.allCases
+            .filter { !TunnelViewModel.interfaceFieldsWithControl.contains($0) }.map(\.localizedUIString)
+        let peerKeys = TunnelViewModel.PeerField.allCases
+            .filter { !TunnelViewModel.peerFieldsWithControl.contains($0) }.map(\.localizedUIString)
+        let sectionTitles = [tr("tunnelSectionTitleInterface"), tr("tunnelSectionTitlePeer")]
+        let keys = (interfaceKeys + peerKeys).map { ($0, NSFont.systemFont(ofSize: 0)) }
+            + sectionTitles.map { ($0, NSFont.boldSystemFont(ofSize: 0)) }
+        let textWidth = keys.map { key, font in tr(format: "macFieldKey (%@)", key).size(withAttributes: [.font: font]).width }.max()!
+        // A label adds a few points around its text.
+        return ceil(textWidth) + 4
+    }()
 }
