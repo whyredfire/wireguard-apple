@@ -3,25 +3,6 @@
 
 import PackageDescription
 
-// WireGuardKitCore and WireGuardKit share Sources/WireGuardKit.
-let wireGuardKitCoreSources = [
-    "DNSServer.swift",
-    "Endpoint.swift",
-    "InterfaceConfiguration.swift",
-    "IPAddressRange.swift",
-    "PeerConfiguration.swift",
-    "PrivateKey.swift",
-    "TunnelConfiguration.swift"
-]
-let wireGuardKitAdapterSources = [
-    "Array+ConcurrentMap.swift",
-    "DNSResolver.swift",
-    "Exports.swift",
-    "IPAddress+AddrInfo.swift",
-    "PacketTunnelSettingsGenerator.swift",
-    "WireGuardAdapter.swift"
-]
-
 // Copied into the app bundle by scripts/build.sh.
 let appLocalizations = [
     "Base", "ca", "de", "es", "fa", "fi", "fr", "id", "it", "ja",
@@ -29,56 +10,19 @@ let appLocalizations = [
 ]
 
 let package = Package(
-    name: "WireGuardKit",
+    name: "WireGuard",
     platforms: [
-        .macOS(.v26),
-        .iOS(.v26)
+        .macOS(.v26)
     ],
-    products: [
-        .library(name: "WireGuardKit", targets: ["WireGuardKit"]),
-        .executable(name: "WireGuard", targets: ["WireGuard"])
-    ],
-    dependencies: [],
     targets: [
-        // MARK: WireGuardKit
-
-        // The configuration model, without wireguard-go, for the app.
-        .target(
-            name: "WireGuardKitCore",
-            dependencies: ["WireGuardKitC"],
-            path: "Sources/WireGuardKit",
-            exclude: wireGuardKitAdapterSources,
-            sources: wireGuardKitCoreSources
-        ),
         .target(
             name: "WireGuardKit",
-            dependencies: ["WireGuardKitCore", "WireGuardKitGo", "WireGuardKitC"],
-            path: "Sources/WireGuardKit",
-            exclude: wireGuardKitCoreSources,
-            sources: wireGuardKitAdapterSources
+            dependencies: ["WireGuardKitC"]
         ),
         .target(
             name: "WireGuardKitC",
-            dependencies: [],
             publicHeadersPath: "."
         ),
-        // libwg-go.a is built by the Makefile.
-        .target(
-            name: "WireGuardKitGo",
-            dependencies: [],
-            exclude: [
-                "goruntime-boottime-over-monotonic.diff",
-                "go.mod",
-                "go.sum",
-                "api-apple.go",
-                "Makefile"
-            ],
-            publicHeadersPath: ".",
-            linkerSettings: [.linkedLibrary("wg-go")]
-        ),
-
-        // MARK: macOS app
-
         .target(
             name: "RingLogger",
             exclude: ["test_ringlogger.c"],
@@ -96,7 +40,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "WireGuard",
-            dependencies: ["WireGuardKitCore", "RingLogger", "Highlighter", "Minizip"],
+            dependencies: ["WireGuardKit", "RingLogger", "Highlighter", "Minizip"],
             path: "Sources/WireGuardApp",
             exclude: appLocalizations.map { "\($0).lproj" } + [
                 "UI/macOS/Resources",
