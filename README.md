@@ -1,36 +1,26 @@
-# [WireGuard](https://www.wireguard.com/) for iOS and macOS
+# [WireGuard](https://www.wireguard.com/) for macOS
 
-This project contains an application for iOS and for macOS, as well as many components shared between the two of them. You may toggle between the two platforms by selecting the target from within Xcode.
+This project contains the WireGuard app for macOS and WireGuardKit, the library it is built on. The
+sources of the iOS app are kept, but it is not built.
 
 ## Building
 
-- Clone this repo:
+The app builds with SwiftPM and the Xcode Command Line Tools. Go is needed for wireguard-go:
 
 ```
-$ git clone https://git.zx2c4.com/wireguard-apple
-$ cd wireguard-apple
+$ brew install go
+$ scripts/build.sh
 ```
 
-- Rename and populate developer team ID file:
+This produces `build/WireGuard.app`, ad-hoc signed. It launches, but can't start tunnels: the
+network extension entitlement requires a provisioning profile. For a working build, register an
+App ID for the app and one for its `.network-extension` with the Network Extensions capability,
+create a development provisioning profile for each, and pass them with your signing identity:
 
 ```
-$ cp Sources/WireGuardApp/Config/Developer.xcconfig.template Sources/WireGuardApp/Config/Developer.xcconfig
-$ vim Sources/WireGuardApp/Config/Developer.xcconfig
+$ SIGN_IDENTITY="Apple Development: …" TEAM_ID=… APP_ID=… \
+    APP_PROFILE=app.provisionprofile EXTENSION_PROFILE=extension.provisionprofile scripts/build.sh
 ```
-
-- Install swiftlint and go 1.19:
-
-```
-$ brew install swiftlint go
-```
-
-- Open project in Xcode:
-
-```
-$ open WireGuard.xcodeproj
-```
-
-- Flip switches, press buttons, and make whirling noises until Xcode builds it.
 
 ## WireGuardKit integration
 

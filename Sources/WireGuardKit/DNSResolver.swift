@@ -4,9 +4,7 @@
 import Network
 import Foundation
 
-#if SWIFT_PACKAGE
 import WireGuardKitCore
-#endif
 
 enum DNSResolver {}
 

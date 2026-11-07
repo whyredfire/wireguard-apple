@@ -3,9 +3,7 @@
 
 import Foundation
 
-#if SWIFT_PACKAGE
 import WireGuardKitCore
-#endif
 
 extension Array {
 

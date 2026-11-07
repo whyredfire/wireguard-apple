@@ -4,9 +4,7 @@
 import Foundation
 import Network
 
-#if SWIFT_PACKAGE
 import WireGuardKitCore
-#endif
 
 extension IPv4Address {
     init?(addrInfo: addrinfo) {

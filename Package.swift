@@ -107,13 +107,11 @@ let package = Package(
             dependencies: ["WireGuardKitCore", "WireGuardShared", "RingLogger", "Highlighter", "Minizip", "LibProc"],
             path: "Sources/WireGuardApp",
             exclude: appLocalizations.map { "\($0).lproj" } + [
-                "Config",
                 "Resources",
                 "UI/iOS",
                 "UI/macOS/Resources",
                 "UI/macOS/Info.plist",
-                "UI/macOS/WireGuard.entitlements",
-                "WireGuard-Bridging-Header.h"
+                "UI/macOS/WireGuard.entitlements"
             ]
         ),
         .executableTarget(
@@ -123,8 +121,7 @@ let package = Package(
             exclude: [
                 "Info.plist",
                 "WireGuardNetworkExtension_iOS.entitlements",
-                "WireGuardNetworkExtension_macOS.entitlements",
-                "WireGuardNetworkExtension-Bridging-Header.h"
+                "WireGuardNetworkExtension_macOS.entitlements"
             ]
         ),
         .executableTarget(
