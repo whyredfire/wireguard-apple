@@ -8,4 +8,7 @@ require (
 	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee
 )
 
-require golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
+require (
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
+)
