@@ -281,7 +281,7 @@ public class WireGuardAdapter {
     ///     tunnel's DNS search domains rather than for all queries.
     ///   - completionHandler: completion handler.
     public func start(tunnelConfiguration: TunnelConfiguration, isSplitDNSEnabled: Bool = false, completionHandler: @escaping (WireGuardAdapterError?) -> Void) {
-        workQueue.async {
+        workQueue.async { [self] in
             guard case .stopped = self.state else {
                 completionHandler(.invalidState)
                 return

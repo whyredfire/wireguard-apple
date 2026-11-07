@@ -2,6 +2,7 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Cocoa
+import UniformTypeIdentifiers
 
 protocol TunnelsListTableViewControllerDelegate: AnyObject {
     func tunnelsSelected(tunnelIndices: [Int])
@@ -135,8 +136,8 @@ class TunnelsListTableViewController: NSViewController {
 
         addButton.menu?.items.forEach { $0.target = self }
         actionButton.menu?.items.forEach { $0.target = self }
-
         removeButton.target = self
+
         view = containerView
     }
 
@@ -208,12 +209,12 @@ class TunnelsListTableViewController: NSViewController {
             guard let self = self else { return }
             guard let window = self.view.window else { return }
             let savePanel = NSSavePanel()
-            savePanel.allowedFileTypes = ["zip"]
+            savePanel.allowedContentTypes = [.zip]
             savePanel.prompt = tr("macSheetButtonExportZip")
             savePanel.nameFieldLabel = tr("macNameFieldExportZip")
             savePanel.nameFieldStringValue = "wireguard-export.zip"
             let tunnelsManager = self.tunnelsManager
-            savePanel.beginSheetModal(for: window) { [weak tunnelsManager] response in
+            savePanel.beginSheetModal(for: window) { [weak self, weak tunnelsManager] response in
                 guard let tunnelsManager = tunnelsManager else { return }
                 guard response == .OK else { return }
                 guard let destinationURL = savePanel.url else { return }

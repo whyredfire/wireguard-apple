@@ -36,15 +36,15 @@ public class LogViewHelper {
     }
 
     func fetchLogEntriesSinceLastFetch(completion: @escaping ([LogViewHelper.LogEntry]) -> Void) {
-        var logEntries = LogEntries()
+        let logEntries = LogEntries()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let newCursor = view_lines_from_cursor(self.log, self.cursor, &logEntries) { cStr, timestamp, ctx in
+            let newCursor = view_lines_from_cursor(self.log, self.cursor, Unmanaged.passUnretained(logEntries).toOpaque()) { cStr, timestamp, ctx in
                 let message = cStr != nil ? String(cString: cStr!) : ""
                 let date = Date(timeIntervalSince1970: Double(timestamp) / 1000000000)
                 let dateString = ISO8601DateFormatter.string(from: date, timeZone: TimeZone.current, formatOptions: LogViewHelper.formatOptions)
-                if let logEntries = ctx?.bindMemory(to: LogEntries.self, capacity: 1) {
-                    logEntries.pointee.entries.append(LogEntry(timestamp: dateString, message: message))
+                if let ctx = ctx {
+                    Unmanaged<LogEntries>.fromOpaque(ctx).takeUnretainedValue().entries.append(LogEntry(timestamp: dateString, message: message))
                 }
             }
             DispatchQueue.main.async { [weak self] in
