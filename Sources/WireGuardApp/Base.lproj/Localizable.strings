@@ -318,6 +318,7 @@
 "macMenuAddEmptyTunnel" = "Add Empty Tunnel…";
 "macMenuViewLog" = "View Log";
 "macMenuExportTunnels" = "Export Tunnels to Zip…";
+"macMenuLaunchAtLogin" = "Launch at Login";
 "macMenuAbout" = "About WireGuard";
 "macMenuQuit" = "Quit WireGuard";
 

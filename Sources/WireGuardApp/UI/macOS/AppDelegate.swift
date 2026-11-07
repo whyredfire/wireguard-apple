@@ -2,7 +2,6 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Cocoa
-import ServiceManagement
 
 @main
 @MainActor
@@ -30,13 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let info = Bundle.main.infoDictionary
         wg_log(.info, message: "App version: \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))")
         let isLaunchedAtLogin = isLaunchingAtLogin
-        if SMAppService.mainApp.status == .notRegistered {
-            do {
-                try SMAppService.mainApp.register()
-            } catch {
-                wg_log(.error, message: "Unable to launch at login: \(error.localizedDescription)")
-            }
-        }
+        LaunchAtLogin.enableOnFirstLaunch()
 
         NSApp.mainMenu = MainMenu.make()
         setDockIconAndMainMenuVisibility(isVisible: !isLaunchedAtLogin)

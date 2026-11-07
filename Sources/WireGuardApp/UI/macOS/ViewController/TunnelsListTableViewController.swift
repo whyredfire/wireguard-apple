@@ -58,6 +58,8 @@ class TunnelsListTableViewController: NSViewController {
         menu.addItem(imageItem)
         menu.addItem(withTitle: tr("macMenuViewLog"), action: #selector(handleViewLogAction), keyEquivalent: "")
         menu.addItem(withTitle: tr("macMenuExportTunnels"), action: #selector(handleExportTunnelsAction), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: tr("macMenuLaunchAtLogin"), action: #selector(handleLaunchAtLoginAction), keyEquivalent: "")
         menu.autoenablesItems = false
 
         let button = NSPopUpButton(frame: NSRect.zero, pullsDown: true)
@@ -81,6 +83,7 @@ class TunnelsListTableViewController: NSViewController {
         tableView.delegate = self
 
         tableView.doubleAction = #selector(listDoubleClicked(sender:))
+        actionButton.menu?.delegate = self
 
         let isSelected = selectTunnelInOperation() || selectTunnel(at: 0)
         if !isSelected {
@@ -203,6 +206,10 @@ class TunnelsListTableViewController: NSViewController {
     @objc func handleViewLogAction() {
         let logVC = LogViewController(tunnelsManager: tunnelsManager)
         self.presentAsSheet(logVC)
+    }
+
+    @objc func handleLaunchAtLoginAction() {
+        LaunchAtLogin.setEnabled(!LaunchAtLogin.isEnabled)
     }
 
     @objc func handleExportTunnelsAction() {
@@ -351,5 +358,11 @@ class FillerButton: NSButton {
 
     override func mouseDown(with event: NSEvent) {
         // Eat mouseDown event, so that the button looks enabled but is unresponsive
+    }
+}
+
+extension TunnelsListTableViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.items.first { $0.action == #selector(handleLaunchAtLoginAction) }?.state = LaunchAtLogin.isEnabled ? .on : .off
     }
 }
