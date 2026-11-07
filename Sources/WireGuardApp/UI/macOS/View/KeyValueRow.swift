@@ -52,6 +52,7 @@ class EditableKeyValueRow: NSView {
 
     var statusObservationToken: ObservationToken?
 
+    /// `NSTableView.dequeueReusableCell()` creates rows with `T()`, which reaches the subclasses' `init()` through this one.
     convenience init() {
         self.init(hasValueImage: false)
     }

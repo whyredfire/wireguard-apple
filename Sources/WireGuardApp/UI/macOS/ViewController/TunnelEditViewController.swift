@@ -11,16 +11,13 @@ protocol TunnelEditViewControllerDelegate: AnyObject {
 
 class TunnelEditViewController: NSViewController {
 
-    let nameRow: EditableKeyValueRow = {
-        let nameRow = EditableKeyValueRow()
-        nameRow.key = tr(format: "macFieldKey (%@)", TunnelViewModel.InterfaceField.name.localizedUIString)
-        return nameRow
-    }()
+    let nameField = NSTextField()
 
-    let publicKeyRow: KeyValueRow = {
-        let publicKeyRow = KeyValueRow()
-        publicKeyRow.key = tr(format: "macFieldKey (%@)", TunnelViewModel.InterfaceField.publicKey.localizedUIString)
-        return publicKeyRow
+    let publicKeyLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.isSelectable = true
+        label.lineBreakMode = .byTruncatingMiddle
+        return label
     }()
 
     let textView: ConfTextView = {
@@ -47,7 +44,7 @@ class TunnelEditViewController: NSViewController {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
-        scrollView.borderType = .bezelBorder
+        scrollView.drawsBackground = false
         return scrollView
     }()
 
@@ -73,6 +70,7 @@ class TunnelEditViewController: NSViewController {
         button.title = tr("macEditDiscard")
         button.setButtonType(.momentaryPushIn)
         button.bezelStyle = .rounded
+        button.keyEquivalent = "\u{1b}"
         return button
     }()
 
@@ -83,6 +81,7 @@ class TunnelEditViewController: NSViewController {
         button.bezelStyle = .rounded
         button.keyEquivalent = "s"
         button.keyEquivalentModifierMask = [.command]
+        button.bezelColor = .controlAccentColor
         return button
     }()
 
@@ -111,10 +110,10 @@ class TunnelEditViewController: NSViewController {
         if let tunnel = tunnel {
             // Editing an existing tunnel
             let tunnelConfiguration = tunnel.tunnelConfiguration!
-            nameRow.value = tunnel.name
+            nameField.stringValue = tunnel.name
             splitDNSCheckbox.state = tunnel.isSplitDNSEnabled ? .on : .off
             textView.string = tunnelConfiguration.asWgQuickConfig()
-            publicKeyRow.value = tunnelConfiguration.interface.privateKey.publicKey.base64Key
+            publicKeyLabel.stringValue = tunnelConfiguration.interface.privateKey.publicKey.base64Key
             textView.privateKeyString = tunnelConfiguration.interface.privateKey.base64Key
             let singlePeer = tunnelConfiguration.peers.count == 1 ? tunnelConfiguration.peers.first : nil
             updateExcludePrivateIPsVisibility(singlePeerAllowedIPs: singlePeer?.allowedIPs.map { $0.stringRepresentation })
@@ -123,14 +122,14 @@ class TunnelEditViewController: NSViewController {
             // Creating a new tunnel
             let privateKey = PrivateKey()
             let bootstrappingText = "[Interface]\nPrivateKey = \(privateKey.base64Key)\n"
-            publicKeyRow.value = privateKey.publicKey.base64Key
+            publicKeyLabel.stringValue = privateKey.publicKey.base64Key
             textView.string = bootstrappingText
             updateExcludePrivateIPsVisibility(singlePeerAllowedIPs: nil)
             dnsServersAddedToAllowedIPs = nil
         }
         let textView = textView
-        privateKeyObservationToken = ObservationToken({ textView.privateKeyString }) { [weak publicKeyRow] privateKeyString in
-            publicKeyRow?.value = privateKeyString.flatMap { PrivateKey(base64Key: $0) }?.publicKey.base64Key ?? ""
+        privateKeyObservationToken = ObservationToken({ textView.privateKeyString }) { [weak publicKeyLabel] privateKeyString in
+            publicKeyLabel?.stringValue = privateKeyString.flatMap { PrivateKey(base64Key: $0) }?.publicKey.base64Key ?? ""
         }
         hasErrorObservationToken = ObservationToken({ textView.hasError }) { [weak saveButton] hasError in
             saveButton?.isEnabled = !hasError
@@ -143,6 +142,8 @@ class TunnelEditViewController: NSViewController {
     override func loadView() {
         populateFields()
 
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 6, height: 8)
         scrollView.documentView = textView
 
         saveButton.target = self
@@ -158,10 +159,38 @@ class TunnelEditViewController: NSViewController {
         let margin: CGFloat = 20
         let internalSpacing: CGFloat = 10
 
-        let editorStackView = NSStackView(views: [nameRow, publicKeyRow, scrollView])
+        let nameTitle = NSTextField(labelWithString: tr(format: "macFieldKey (%@)", TunnelViewModel.InterfaceField.name.localizedUIString))
+        let publicKeyTitle = NSTextField(labelWithString: tr(format: "macFieldKey (%@)", TunnelViewModel.InterfaceField.publicKey.localizedUIString))
+        let form = NSGridView(views: [[nameTitle, nameField], [publicKeyTitle, publicKeyLabel]])
+        form.rowSpacing = internalSpacing
+        form.rowAlignment = .firstBaseline
+        for title in [nameTitle, publicKeyTitle] {
+            title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        }
+
+        // Matches the box behind the tunnel details.
+        let editorBox = NSBox()
+        editorBox.titlePosition = .noTitle
+        editorBox.fillColor = .unemphasizedSelectedContentBackgroundColor
+        let editor = NSView()
+        for subview in [editorBox, scrollView] {
+            editor.addSubview(subview)
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                subview.topAnchor.constraint(equalTo: editor.topAnchor),
+                subview.bottomAnchor.constraint(equalTo: editor.bottomAnchor),
+                subview.leadingAnchor.constraint(equalTo: editor.leadingAnchor),
+                subview.trailingAnchor.constraint(equalTo: editor.trailingAnchor)
+            ])
+        }
+
+        let editorStackView = NSStackView(views: [form, editor])
         editorStackView.orientation = .vertical
         editorStackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         editorStackView.spacing = internalSpacing
+        for view in [form, editor] {
+            view.widthAnchor.constraint(equalTo: editorStackView.widthAnchor).isActive = true
+        }
 
         let buttonRowStackView = NSStackView()
         buttonRowStackView.setViews([discardButton, saveButton], in: .trailing)
@@ -187,12 +216,12 @@ class TunnelEditViewController: NSViewController {
 
     func setUserInteractionEnabled(_ enabled: Bool) {
         view.window?.ignoresMouseEvents = !enabled
-        nameRow.valueLabel.isEditable = enabled
+        nameField.isEditable = enabled
         textView.isEditable = enabled
     }
 
     @objc func handleSaveAction() {
-        let name = nameRow.value
+        let name = nameField.stringValue
         guard !name.isEmpty else {
             ErrorPresenter.showErrorAlert(title: tr("macAlertNameIsEmpty"), message: "", from: self)
             return
@@ -207,7 +236,7 @@ class TunnelEditViewController: NSViewController {
 
         var tunnelConfiguration: TunnelConfiguration
         do {
-            tunnelConfiguration = try TunnelConfiguration(fromWgQuickConfig: textView.string, called: nameRow.value)
+            tunnelConfiguration = try TunnelConfiguration(fromWgQuickConfig: textView.string, called: nameField.stringValue)
         } catch let error as WireGuardAppError {
             ErrorPresenter.showErrorAlert(error: error, from: self)
             return
@@ -284,7 +313,7 @@ class TunnelEditViewController: NSViewController {
 
     @objc func excludePrivateIPsCheckboxToggled(sender: AnyObject?) {
         guard let excludePrivateIPsCheckbox = sender as? NSButton else { return }
-        guard let tunnelConfiguration = try? TunnelConfiguration(fromWgQuickConfig: textView.string, called: nameRow.value) else { return }
+        guard let tunnelConfiguration = try? TunnelConfiguration(fromWgQuickConfig: textView.string, called: nameField.stringValue) else { return }
         let isOn = excludePrivateIPsCheckbox.state == .on
         let tunnelViewModel = TunnelViewModel(tunnelConfiguration: tunnelConfiguration)
         tunnelViewModel.peersData.first?.excludePrivateIPsValueChanged(isOn: isOn, dnsServers: tunnelViewModel.interfaceData[.dns], oldDNSServers: dnsServersAddedToAllowedIPs)

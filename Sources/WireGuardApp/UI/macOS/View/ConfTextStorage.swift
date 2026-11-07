@@ -4,11 +4,11 @@
 import Cocoa
 import Highlighter
 
-private let fontSize: CGFloat = 15
+private let fontSize: CGFloat = 13
 
 class ConfTextStorage: NSTextStorage {
-    let defaultFont = NSFontManager.shared.convertWeight(true, of: NSFont.systemFont(ofSize: fontSize))
-    private let boldFont = NSFont.boldSystemFont(ofSize: fontSize)
+    let defaultFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    private let boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
     private lazy var italicFont = NSFontManager.shared.convert(defaultFont, toHaveTrait: .italicFontMask)
 
     private var textColorTheme: ConfTextColorTheme.Type?
