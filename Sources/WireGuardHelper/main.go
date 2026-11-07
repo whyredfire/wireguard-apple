@@ -25,10 +25,10 @@ const (
 
 func main() {
 	uid := flag.Int("uid", -1, "the user allowed to connect")
-	cdhash := flag.String("cdhash", "", "the code directory hash of the app allowed to connect")
+	requirement := flag.String("requirement", "", "the code requirement of the app allowed to connect")
 	flag.Parse()
-	if *uid < 0 {
-		fmt.Fprintln(os.Stderr, "usage: wireguard-helper -uid <uid> [-cdhash <hash>]")
+	if *uid < 0 || *requirement == "" {
+		fmt.Fprintln(os.Stderr, "usage: wireguard-helper -uid <uid> -requirement <code requirement>")
 		os.Exit(64)
 	}
 
@@ -41,7 +41,7 @@ func main() {
 	}
 	bind.AddControl(netns.Control(logf))
 
-	s := &server{logf: logf, log: ring, uid: *uid, cdhash: *cdhash, tunnels: map[string]*tunnel{}}
+	s := &server{logf: logf, log: ring, uid: *uid, requirement: *requirement, tunnels: map[string]*tunnel{}}
 	if _, err := netmon.Watch(logf, s.networkChanged); err != nil {
 		log.Fatalf("watching the network: %v", err)
 	}

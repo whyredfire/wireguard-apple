@@ -31,12 +31,12 @@ type response struct {
 }
 
 type server struct {
-	logf    logger.Logf
-	log     *ringLog
-	uid     int
-	cdhash  string
-	mu      sync.Mutex
-	tunnels map[string]*tunnel
+	logf        logger.Logf
+	log         *ringLog
+	uid         int
+	requirement string
+	mu          sync.Mutex
+	tunnels     map[string]*tunnel
 }
 
 func (s *server) serve(path string) error {
@@ -64,9 +64,9 @@ func (s *server) serve(path string) error {
 // long as the connection, so they stop when the app quits or crashes.
 func (s *server) handle(conn *net.UnixConn) {
 	defer conn.Close()
-	uid, cdhash, err := peerIdentity(conn)
-	if err != nil || uid != s.uid || (s.cdhash != "" && cdhash != s.cdhash) {
-		s.logf("rejected a connection from uid %d, cdhash %s: %v", uid, cdhash, err)
+	uid, err := checkPeer(conn, s.requirement)
+	if err != nil || uid != s.uid {
+		s.logf("rejected a connection from uid %d: %v", uid, err)
 		json.NewEncoder(conn).Encode(response{Error: "unauthorized"})
 		return
 	}

@@ -4,52 +4,71 @@
 package main
 
 /*
-#cgo LDFLAGS: -lbsm
+#cgo LDFLAGS: -lbsm -framework Security -framework CoreFoundation
+#include <Security/Security.h>
 #include <bsm/libbsm.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#define CS_OPS_CDHASH 5
-int csops_audittoken(pid_t pid, unsigned int ops, void *useraddr, size_t usersize, audit_token_t *token);
-
-// Reads the effective user ID and code directory hash of the process at the
-// other end of a Unix socket. The audit token, unlike a PID, can't be reused
-// by another process.
-static int peer_identity(int fd, uid_t *uid, unsigned char cdhash[20]) {
+// Checks the process at the other end of a Unix socket against a code
+// requirement, identifying it by its audit token, which unlike a PID can't be
+// reused by another process.
+static OSStatus check_peer(int fd, const char *requirement_text, uid_t *uid) {
 	audit_token_t token;
 	socklen_t size = sizeof(token);
 	if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) != 0)
-		return -1;
+		return errSecIO;
 	*uid = audit_token_to_euid(token);
-	return csops_audittoken(audit_token_to_pid(token), CS_OPS_CDHASH, cdhash, 20, &token);
+
+	CFDataRef token_data = CFDataCreate(NULL, (const UInt8 *)&token, sizeof(token));
+	const void *keys[] = { kSecGuestAttributeAudit };
+	const void *values[] = { token_data };
+	CFDictionaryRef attributes = CFDictionaryCreate(NULL, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	SecCodeRef code = NULL;
+	OSStatus status = SecCodeCopyGuestWithAttributes(NULL, attributes, kSecCSDefaultFlags, &code);
+	CFRelease(attributes);
+	CFRelease(token_data);
+	if (status != errSecSuccess)
+		return status;
+
+	CFStringRef text = CFStringCreateWithCString(NULL, requirement_text, kCFStringEncodingUTF8);
+	SecRequirementRef requirement = NULL;
+	status = SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement);
+	CFRelease(text);
+	if (status == errSecSuccess) {
+		status = SecCodeCheckValidity(code, kSecCSDefaultFlags, requirement);
+		CFRelease(requirement);
+	}
+	CFRelease(code);
+	return status;
 }
 */
 import "C"
 
 import (
-	"encoding/hex"
 	"fmt"
 	"net"
 	"unsafe"
 )
 
-// peerIdentity returns the effective user ID and the hex encoded code
-// directory hash of the process connected to conn.
-func peerIdentity(conn *net.UnixConn) (uid int, cdhash string, err error) {
+// checkPeer returns the effective user ID of the process connected to conn,
+// and an error unless its code satisfies the code requirement.
+func checkPeer(conn *net.UnixConn, requirement string) (uid int, err error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {
-		return 0, "", err
+		return -1, err
 	}
-	var cUID C.uid_t
-	var hash [20]byte
-	var ret C.int
+	text := C.CString(requirement)
+	defer C.free(unsafe.Pointer(text))
+	var cUID C.uid_t = C.uid_t(^uint32(0))
+	var status C.OSStatus
 	if err := raw.Control(func(fd uintptr) {
-		ret = C.peer_identity(C.int(fd), &cUID, (*C.uchar)(unsafe.Pointer(&hash[0])))
+		status = C.check_peer(C.int(fd), text, &cUID)
 	}); err != nil {
-		return 0, "", err
+		return -1, err
 	}
-	if ret != 0 {
-		return 0, "", fmt.Errorf("reading the peer's identity failed")
+	if status != C.errSecSuccess {
+		return int(cUID), fmt.Errorf("code requirement not satisfied (OSStatus %d)", int(status))
 	}
-	return int(cUID), hex.EncodeToString(hash[:]), nil
+	return int(cUID), nil
 }
