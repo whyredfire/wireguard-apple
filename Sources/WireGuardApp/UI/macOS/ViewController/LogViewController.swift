@@ -78,7 +78,7 @@ class LogViewController: NSViewController {
 
     let tunnelsManager: TunnelsManager
     let logViewHelper: LogViewHelper?
-    private var helperLogCursor = 0
+    private var helperLogCursor = HelperClient.LogCursor()
     var logEntries = [LogViewHelper.LogEntry]()
     var isFetchingLogEntries = false
     var isInScrolledToEndMode = true
@@ -227,24 +227,23 @@ class LogViewController: NSViewController {
         savePanel.nameFieldStringValue = "wireguard-log-\(timeStampString).txt"
 
         savePanel.beginSheetModal(for: self.view.window!) { [weak self] response in
-            guard response == .OK else { return }
-            guard let destinationURL = savePanel.url else { return }
-
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let isWritten = Logger.global?.writeLog(to: destinationURL.path) ?? false
-                guard isWritten else {
-                    DispatchQueue.main.async { [weak self] in
-                        ErrorPresenter.showErrorAlert(title: tr("alertUnableToWriteLogTitle"), message: tr("alertUnableToWriteLogMessage"), from: self)
-                    }
-                    return
-                }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
+            guard let self, response == .OK, let destinationURL = savePanel.url else { return }
+            // The entries in the window, as the app's log file lacks the helper's.
+            let text = self.logEntries.map { $0.text() + "\n" }.joined()
+            Task {
+                do {
+                    try await Self.write(text, to: destinationURL)
                     self.presentingViewController?.dismiss(self)
+                } catch {
+                    ErrorPresenter.showErrorAlert(title: tr("alertUnableToWriteLogTitle"), message: tr("alertUnableToWriteLogMessage"), from: self)
                 }
             }
-
         }
+    }
+
+    @concurrent
+    private static func write(_ text: String, to url: URL) async throws {
+        try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
     @objc func closeClicked() {

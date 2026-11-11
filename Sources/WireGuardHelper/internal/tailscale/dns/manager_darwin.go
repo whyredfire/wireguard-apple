@@ -119,6 +119,11 @@ func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 			return fmt.Errorf("invalid resolver domain %q: must not contain slashes or colons", fileBase)
 		}
 
+		// Closing removes the file, so leave alone one that something else put there.
+		if existing, err := root.ReadFile(fileBase); err == nil && !bytes.HasPrefix(existing, []byte(resolverFileHeader)) {
+			return fmt.Errorf("%s already has a resolver file that isn't WireGuard's", fileBase)
+		}
+
 		if err := root.WriteFile(fileBase, buf.Bytes(), 0644); err != nil {
 			return err
 		}

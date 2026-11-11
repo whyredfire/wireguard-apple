@@ -4,6 +4,7 @@
 package main
 
 import (
+	"fmt"
 	"net/netip"
 	"reflect"
 	"testing"
@@ -66,17 +67,40 @@ func TestResolveEndpoints(t *testing.T) {
 }
 
 func TestRingLogSince(t *testing.T) {
-	r := &ringLog{}
+	r := newRingLog()
 	for i := 0; i < 2005; i++ {
 		r.Write([]byte("line\n"))
 	}
-	entries, cursor := r.since(0)
+	entries, cursor := r.since(r.id, 0)
 	if len(entries) != 2000 || cursor != 2005 {
 		t.Fatalf("since(0) = %d entries, cursor %d; want 2000, 2005", len(entries), cursor)
 	}
 	r.Write([]byte("new\n"))
-	entries, cursor = r.since(cursor)
+	entries, cursor = r.since(r.id, cursor)
 	if len(entries) != 1 || entries[0].Message != "new" || cursor != 2006 {
 		t.Fatalf("since(2005) = %v, cursor %d; want [new], 2006", entries, cursor)
+	}
+
+	// The cursor the app kept from a previous run of the helper.
+	restarted := newRingLog()
+	restarted.Write([]byte("first\n"))
+	restarted.Write([]byte("second\n"))
+	for _, stale := range []int{1, 2006} {
+		entries, cursor = restarted.since(r.id, stale)
+		if len(entries) != 2 || cursor != 2 {
+			t.Errorf("since(%d) of another log = %v, cursor %d; want both entries, 2", stale, entries, cursor)
+		}
+	}
+	if entries, _ = restarted.since(restarted.id, 2006); len(entries) != 2 {
+		t.Errorf("since(2006) past the end = %v; want both entries", entries)
+	}
+}
+
+func TestPrefixedLog(t *testing.T) {
+	var got string
+	logf := prefixed(func(format string, args ...any) { got = fmt.Sprintf(format, args...) }, "100%s up")
+	logf("started on %s", "utun4")
+	if want := "100%s up: started on utun4"; got != want {
+		t.Errorf("logged %q, want %q", got, want)
 	}
 }

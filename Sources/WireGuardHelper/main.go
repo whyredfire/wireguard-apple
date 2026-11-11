@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 )
 
 const (
-	version    = "2"
+	version    = "3"
 	socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
 )
 
@@ -34,7 +35,7 @@ func main() {
 		os.Exit(64)
 	}
 
-	ring := &ringLog{}
+	ring := newRingLog()
 	logger := log.New(ring, "", 0)
 	logf := logger.Printf
 
@@ -43,7 +44,7 @@ func main() {
 	}
 	bind.AddControl(netns.Control(logf))
 
-	s := &server{logf: logf, log: ring, uid: *uid, requirement: *requirement, tunnels: map[string]*tunnel{}}
+	s := &server{logf: logf, log: ring, uid: *uid, requirement: *requirement, startTunnel: startTunnel, tunnels: map[string]*tunnel{}}
 	if _, err := netmon.Watch(logf, s.networkChanged); err != nil {
 		log.Fatalf("watching the network: %v", err)
 	}
@@ -57,9 +58,14 @@ type logEntry struct {
 
 // ringLog writes to stderr and keeps the last entries for the app's log view.
 type ringLog struct {
+	id      int64 // tells this log apart from the one of another run of the helper
 	mu      sync.Mutex
 	entries []logEntry
 	total   int
+}
+
+func newRingLog() *ringLog {
+	return &ringLog{id: 1 + rand.Int64N(1<<53-1)} // Fits a JSON number.
 }
 
 func (r *ringLog) Write(p []byte) (int, error) {
@@ -74,10 +80,15 @@ func (r *ringLog) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// since returns the entries written after the first cursor ones, and the new cursor.
-func (r *ringLog) since(cursor int) ([]logEntry, int) {
+// since returns the entries written after the first cursor ones, and the new
+// cursor. A cursor into another log, such as the one the app keeps while the
+// helper restarts, counts as 0.
+func (r *ringLog) since(id int64, cursor int) ([]logEntry, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if id != r.id || cursor > r.total {
+		cursor = 0
+	}
 	first := r.total - len(r.entries)
 	return append([]logEntry(nil), r.entries[max(cursor-first, 0):]...), r.total
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -15,21 +16,27 @@ import (
 	"wireguard-helper/internal/tailscale/logger"
 )
 
-// Requests and responses are JSON objects, one per line.
+// Requests and responses are JSON objects, one per line. A response carries
+// the ID of its request, as the responses to requests about different tunnels
+// can come in another order than the requests.
 type request struct {
+	ID     int    `json:"id"`
 	Op     string `json:"op"`
 	Name   string `json:"name,omitempty"`
 	Config Config `json:"config,omitempty"`
 	Cursor int    `json:"cursor,omitempty"`
+	LogID  int64  `json:"logID,omitempty"`
 }
 
 type response struct {
+	ID        int        `json:"id,omitempty"`
 	Error     string     `json:"error,omitempty"`
 	Version   string     `json:"version,omitempty"`
 	Interface string     `json:"interface,omitempty"`
 	Runtime   string     `json:"runtime,omitempty"`
 	Log       []logEntry `json:"log,omitempty"`
 	Cursor    int        `json:"cursor,omitempty"`
+	LogID     int64      `json:"logID,omitempty"`
 }
 
 type server struct {
@@ -37,8 +44,9 @@ type server struct {
 	log         *ringLog
 	uid         int
 	requirement string
+	startTunnel func(logger.Logf, Config) (*tunnel, error)
 	mu          sync.Mutex
-	tunnels     map[string]*tunnel
+	tunnels     map[string]*tunnel // nil while a tunnel is starting
 }
 
 func (s *server) serve(path string) error {
@@ -62,8 +70,6 @@ func (s *server) serve(path string) error {
 	}
 }
 
-// handle serves one connection of the app. The tunnels it starts only live as
-// long as the connection, so they stop when the app quits or crashes.
 func (s *server) handle(conn *net.UnixConn) {
 	defer conn.Close()
 	uid, err := checkPeer(conn, s.requirement)
@@ -72,32 +78,60 @@ func (s *server) handle(conn *net.UnixConn) {
 		json.NewEncoder(conn).Encode(response{Error: "unauthorized"})
 		return
 	}
+	s.serveClient(conn)
+}
 
-	started := map[string]bool{}
+// serveClient serves one connection of the app. The tunnels it starts only
+// live as long as the connection, so they stop when the app quits or crashes.
+//
+// Requests about the same tunnel are handled in the order they came in, and
+// those about different tunnels at the same time, so that a tunnel that takes
+// long to start doesn't hold up the others.
+func (s *server) serveClient(conn io.ReadWriter) {
+	var started sync.Map // the names of the tunnels started over this connection
+	var requests sync.WaitGroup
 	defer func() {
-		for name := range started {
-			s.stop(name)
-		}
+		requests.Wait()
+		started.Range(func(name, _ any) bool {
+			s.stop(name.(string))
+			return true
+		})
 	}()
 
+	var writing sync.Mutex
+	encoder := json.NewEncoder(conn)
+	latest := map[string]chan struct{}{} // by tunnel, closed when its latest request is done
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(nil, 1<<20)
-	encoder := json.NewEncoder(conn)
 	for scanner.Scan() {
 		var req request
-		var resp response
-		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-			resp.Error = err.Error()
-		} else if err := s.do(req, &resp, started); err != nil {
-			resp.Error = err.Error()
+		err := json.Unmarshal(scanner.Bytes(), &req)
+		name := req.Name
+		if req.Op == "up" {
+			name = req.Config.Name
 		}
-		if err := encoder.Encode(resp); err != nil {
-			return
-		}
+		previous, done := latest[name], make(chan struct{})
+		latest[name] = done
+		requests.Go(func() {
+			defer close(done)
+			if previous != nil {
+				<-previous
+			}
+			resp := response{ID: req.ID}
+			if err == nil {
+				err = s.do(req, &resp, &started)
+			}
+			if err != nil {
+				resp.Error = err.Error()
+			}
+			writing.Lock()
+			defer writing.Unlock()
+			encoder.Encode(resp)
+		})
 	}
 }
 
-func (s *server) do(req request, resp *response, started map[string]bool) error {
+func (s *server) do(req request, resp *response, started *sync.Map) error {
 	switch req.Op {
 	case "version":
 		resp.Version = version
@@ -106,13 +140,12 @@ func (s *server) do(req request, resp *response, started map[string]bool) error 
 		if err != nil {
 			return err
 		}
-		started[req.Config.Name] = true
+		started.Store(req.Config.Name, true)
 		resp.Interface = ifName
 	case "down":
-		if !started[req.Name] {
+		if _, ok := started.LoadAndDelete(req.Name); !ok {
 			return fmt.Errorf("%s is not active", req.Name)
 		}
-		delete(started, req.Name)
 		s.stop(req.Name)
 	case "runtime":
 		s.mu.Lock()
@@ -127,21 +160,31 @@ func (s *server) do(req request, resp *response, started map[string]bool) error 
 		}
 		resp.Runtime = config
 	case "log":
-		resp.Log, resp.Cursor = s.log.since(req.Cursor)
+		resp.Log, resp.Cursor = s.log.since(req.LogID, req.Cursor)
+		resp.LogID = s.log.id
 	default:
 		return errors.New("unknown operation " + req.Op)
 	}
 	return nil
 }
 
+// start starts a tunnel without holding the lock, as resolving its endpoints
+// can take a while. Its name is taken in the meantime.
 func (s *server) start(cfg Config) (string, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.tunnels[cfg.Name] != nil {
+	if _, ok := s.tunnels[cfg.Name]; ok {
+		s.mu.Unlock()
 		return "", fmt.Errorf("%s is already active", cfg.Name)
 	}
-	t, err := startTunnel(s.logf, cfg)
+	s.tunnels[cfg.Name] = nil
+	s.mu.Unlock()
+
+	t, err := s.startTunnel(s.logf, cfg)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err != nil {
+		delete(s.tunnels, cfg.Name)
 		return "", err
 	}
 	s.tunnels[cfg.Name] = t
@@ -163,7 +206,9 @@ func (s *server) networkChanged() {
 	s.mu.Lock()
 	tunnels := make([]*tunnel, 0, len(s.tunnels))
 	for _, t := range s.tunnels {
-		tunnels = append(tunnels, t)
+		if t != nil {
+			tunnels = append(tunnels, t)
+		}
 	}
 	s.mu.Unlock()
 	for _, t := range tunnels {

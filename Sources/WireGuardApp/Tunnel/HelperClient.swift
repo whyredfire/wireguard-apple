@@ -20,18 +20,27 @@ enum HelperError: LocalizedError {
 }
 
 /// Talks to the root helper over its Unix socket, with JSON requests and
-/// responses, one per line, answered in order.
+/// responses, one per line. A response carries the ID of its request, as the
+/// helper answers requests about different tunnels in any order.
 actor HelperClient {
     static let socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
-    static let version = "2"
+    static let version = "3"
 
     struct Response: Decodable, Sendable {
+        var id: Int?
         var error: String?
         var version: String?
         var interface: String?
         var runtime: String?
         var log: [LogLine]?
         var cursor: Int?
+        var logID: Int64?
+    }
+
+    /// A position in the helper's log. A helper that restarted keeps a new log, with another ID.
+    struct LogCursor: Sendable {
+        var logID: Int64 = 0
+        var position = 0
     }
 
     struct LogLine: Decodable, Sendable {
@@ -41,7 +50,8 @@ actor HelperClient {
 
     private let fd: Int32
     private let handle: FileHandle
-    private var pending: [CheckedContinuation<Response, Error>] = []
+    private var pending: [Int: CheckedContinuation<Response, Error>] = [:]
+    private var lastRequestID = 0
     private var isConnected = true
     private var isEstablished = false
 
@@ -49,6 +59,9 @@ actor HelperClient {
     init(onDisconnect: @escaping @Sendable () -> Void) throws {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw HelperError.unavailable(POSIXError(.init(rawValue: errno) ?? .EIO)) }
+        // Writing to a helper that is gone must fail, not end the app with SIGPIPE.
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         withUnsafeMutableBytes(of: &address.sun_path) { path in
@@ -122,22 +135,26 @@ actor HelperClient {
     }
 
     @discardableResult
-    func request(_ op: String, name: String? = nil, config: HelperTunnelConfig? = nil, cursor: Int? = nil) async throws -> Response {
+    func request(_ op: String, name: String? = nil, config: HelperTunnelConfig? = nil, logCursor: LogCursor? = nil) async throws -> Response {
         struct Request: Encodable {
+            var id: Int
             var op: String
             var name: String?
             var config: HelperTunnelConfig?
             var cursor: Int?
+            var logID: Int64?
         }
         guard isConnected else { throw HelperError.disconnected }
-        var line = try JSONEncoder().encode(Request(op: op, name: name, config: config, cursor: cursor))
+        lastRequestID += 1
+        let id = lastRequestID
+        var line = try JSONEncoder().encode(Request(id: id, op: op, name: name, config: config, cursor: logCursor?.position, logID: logCursor?.logID))
         line.append(UInt8(ascii: "\n"))
         let response = try await withCheckedThrowingContinuation { continuation in
-            pending.append(continuation)
+            pending[id] = continuation
             do {
                 try handle.write(contentsOf: line)
             } catch {
-                pending.removeLast()
+                pending[id] = nil
                 continuation.resume(throwing: HelperError.disconnected)
             }
         }
@@ -149,20 +166,27 @@ actor HelperClient {
 
     private func receive(_ lines: AsyncStream<Data>, onDisconnect: @Sendable () -> Void) async {
         for await line in lines {
-            guard !pending.isEmpty else { continue }
-            let continuation = pending.removeFirst()
-            do {
-                continuation.resume(returning: try JSONDecoder().decode(Response.self, from: line))
-            } catch {
-                continuation.resume(throwing: HelperError.failed("Invalid response from the WireGuard helper."))
+            guard let response = try? JSONDecoder().decode(Response.self, from: line) else {
+                // There is no telling which request this answers, so give up on all of them.
+                close()
+                continue
+            }
+            // Without an ID, the response is from a helper that is turning this app away, or from
+            // one from before requests had IDs, which answers them in order.
+            if let id = response.id ?? pending.keys.min(), let continuation = pending.removeValue(forKey: id) {
+                continuation.resume(returning: response)
             }
         }
         isConnected = false
-        pending.forEach { $0.resume(throwing: HelperError.disconnected) }
-        pending.removeAll()
+        failPending(with: HelperError.disconnected)
         if isEstablished {
             onDisconnect()
         }
+    }
+
+    private func failPending(with error: Error) {
+        pending.values.forEach { $0.resume(throwing: error) }
+        pending.removeAll()
     }
 }
 

@@ -242,6 +242,7 @@ func resolveEndpoint(endpoint string) (netip.AddrPort, error) {
 
 func prefixed(logf logger.Logf, prefix string) logger.Logf {
 	return func(format string, args ...any) {
-		logf(prefix+": "+format, args...)
+		// The prefix isn't part of the format, as a tunnel's name can contain a %.
+		logf("%s: "+format, append([]any{prefix}, args...)...)
 	}
 }

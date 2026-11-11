@@ -28,10 +28,6 @@ final class Logger: @unchecked Sendable { // The ring logger is thread-safe, and
     func log(message: String) {
         write_msg_to_log(log, tag, message.trimmingCharacters(in: .newlines))
     }
-
-    func writeLog(to targetFile: String) -> Bool {
-        return write_log_to_file(targetFile, log) == 0
-    }
 }
 
 private let systemLog = os.Logger(subsystem: Bundle.main.bundleIdentifier ?? "WireGuard", category: "app")

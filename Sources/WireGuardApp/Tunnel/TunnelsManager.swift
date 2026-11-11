@@ -22,13 +22,18 @@ protocol TunnelsManagerActivationDelegate: AnyObject {
 @MainActor
 class TunnelsManager {
     private var tunnels: [TunnelContainer]
+    /// The stored tunnels whose configuration couldn't be read, which stay stored as they are.
+    private var unreadableTunnels: [String: TunnelStore.Tunnel]
     weak var tunnelsListDelegate: TunnelsManagerListDelegate?
     weak var activationDelegate: TunnelsManagerActivationDelegate?
     fileprivate private(set) var helper: HelperClient?
     private var isReconnecting = false
+    private var reconnection: Task<Void, Error>?
+    private var restoration: Task<Void, Never>?
 
-    private init(tunnels: [TunnelContainer]) {
+    private init(tunnels: [TunnelContainer], unreadableTunnels: [String: TunnelStore.Tunnel]) {
         self.tunnels = tunnels
+        self.unreadableTunnels = unreadableTunnels
         tunnels.forEach { $0.manager = self }
     }
 
@@ -40,15 +45,17 @@ class TunnelsManager {
             completionHandler(.failure(.systemErrorOnListingTunnels(systemError: error)))
             return
         }
+        var unreadableTunnels = [String: TunnelStore.Tunnel]()
         let tunnels = stored.compactMap { name, tunnel -> TunnelContainer? in
             guard let configuration = try? TunnelConfiguration(fromWgQuickConfig: tunnel.config, called: name) else {
-                wg_log(.error, message: "Skipping tunnel '\(name)' with an unreadable configuration")
+                wg_log(.error, message: "Leaving out tunnel '\(name)' with an unreadable configuration")
+                unreadableTunnels[name] = tunnel
                 return nil
             }
             return TunnelContainer(configuration: configuration, isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
         }.sorted { tunnelNameIsLessThan($0.name, $1.name) }
 
-        let manager = TunnelsManager(tunnels: tunnels)
+        let manager = TunnelsManager(tunnels: tunnels, unreadableTunnels: unreadableTunnels)
         Task {
             do {
                 try await manager.connectHelper(canInstall: true)
@@ -145,6 +152,8 @@ class TunnelsManager {
             tunnel.status = .restarting
             Task {
                 _ = try? await helper?.request("down", name: oldName)
+                // Unless it was turned off, or went down with the helper's connection, in the meantime.
+                guard tunnel.status == .restarting else { return }
                 tunnel.status = .inactive
                 startActivation(of: tunnel)
             }
@@ -210,21 +219,32 @@ class TunnelsManager {
             activationDelegate?.tunnelActivationFailed(tunnel: tunnel, error: .tunnelIsNotInactive)
             return
         }
+        let activation = activate(tunnel, with: configuration, canInstallHelper: true)
+        Task {
+            if let error = await activation.value {
+                activationDelegate?.tunnelActivationFailed(tunnel: tunnel, error: .failedWhileStarting(systemError: error))
+            }
+        }
+    }
+
+    /// Starts turning on an inactive tunnel. The task's value is why that failed,
+    /// or nil when the tunnel is on or was turned off again in the meantime.
+    private func activate(_ tunnel: TunnelContainer, with configuration: TunnelConfiguration, canInstallHelper: Bool) -> Task<Error?, Never> {
         tunnel.status = .activating
         activeTunnelNames.insert(tunnel.name)
         let config = HelperTunnelConfig(configuration, name: tunnel.name, isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
-        Task {
+        return Task {
             do {
-                guard let helper else { throw HelperError.disconnected }
-                try await helper.request("up", config: config)
-                guard tunnel.status == .activating else { return }
+                try await connectedHelper(canInstall: canInstallHelper).request("up", config: config)
+                guard tunnel.status == .activating else { return nil }
                 tunnel.status = .active
                 activationDelegate?.tunnelActivationSucceeded(tunnel: tunnel)
+                return nil
             } catch {
-                guard tunnel.status == .activating else { return }
+                guard tunnel.status == .activating else { return nil }
                 wg_log(.error, message: "Starting tunnel '\(tunnel.name)' failed: \(error.localizedDescription)")
                 tunnel.status = .inactive
-                activationDelegate?.tunnelActivationFailed(tunnel: tunnel, error: .failedWhileStarting(systemError: error))
+                return error
             }
         }
     }
@@ -239,11 +259,11 @@ class TunnelsManager {
         }
     }
 
-    /// The helper's log entries after the first `cursor` ones, and the new cursor.
-    func helperLog(since cursor: Int) async -> (entries: [LogViewHelper.LogEntry], cursor: Int) {
-        guard let response = try? await helper?.request("log", cursor: cursor) else { return ([], cursor) }
+    /// The helper's log entries after `cursor`, and the new cursor.
+    func helperLog(since cursor: HelperClient.LogCursor) async -> (entries: [LogViewHelper.LogEntry], cursor: HelperClient.LogCursor) {
+        guard let response = try? await helper?.request("log", logCursor: cursor) else { return ([], cursor) }
         let entries = (response.log ?? []).map { LogViewHelper.LogEntry(timestamp: $0.time, message: "[HELPER] " + $0.message) }
-        return (entries, response.cursor ?? cursor)
+        return (entries, HelperClient.LogCursor(logID: response.logID ?? 0, position: response.cursor ?? 0))
     }
 
     /// The tunnels that were turned on, so they come back when the app or the helper restarts.
@@ -252,26 +272,74 @@ class TunnelsManager {
         set { UserDefaults.standard.set(newValue.sorted(), forKey: "ActiveTunnels") }
     }
 
+    /// Turns the tunnels that were on back on. Right after logging in the network can still be down,
+    /// and then their endpoints don't resolve, so the tunnels that fail to start are tried again for
+    /// a couple of minutes before the failure is reported.
     private func restoreActiveTunnels() {
-        let names = activeTunnelNames
-        for tunnel in tunnels where names.contains(tunnel.name) && tunnel.status == .inactive {
-            startActivation(of: tunnel)
+        restoration?.cancel()
+        restoration = Task {
+            var failures = [(tunnel: TunnelContainer, error: Error)]()
+            for attempt in 0..<10 {
+                if attempt > 0 {
+                    do {
+                        try await Task.sleep(for: .seconds(min(1 << attempt, 15)))
+                    } catch {
+                        return
+                    }
+                }
+                // Not the tunnels that were turned off, or on by hand, in the meantime.
+                let names = activeTunnelNames
+                let activations = tunnels.filter { names.contains($0.name) && $0.status == .inactive }.compactMap { tunnel in
+                    tunnel.tunnelConfiguration.map { (tunnel: tunnel, task: activate(tunnel, with: $0, canInstallHelper: false)) }
+                }
+                failures = []
+                for activation in activations {
+                    if let error = await activation.task.value {
+                        failures.append((activation.tunnel, error))
+                    }
+                }
+                // Restoring started over, after reconnecting to the helper.
+                guard !Task.isCancelled else { return }
+                if failures.isEmpty {
+                    return
+                }
+            }
+            for failure in failures {
+                activationDelegate?.tunnelActivationFailed(tunnel: failure.tunnel, error: .failedWhileStarting(systemError: failure.error))
+            }
         }
     }
 
     private func save() throws {
-        var stored = [String: TunnelStore.Tunnel]()
+        // The unreadable tunnels stay stored, unless a tunnel took their name.
+        var stored = unreadableTunnels
         for tunnel in tunnels {
             guard let configuration = tunnel.tunnelConfiguration else { continue }
             stored[tunnel.name] = TunnelStore.Tunnel(config: configuration.asWgQuickConfig(), isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
         }
         try TunnelStore.save(stored)
+        unreadableTunnels = unreadableTunnels.filter { name, _ in !tunnels.contains { $0.name == name } }
     }
 
     private func connectHelper(canInstall: Bool) async throws {
         helper = try await HelperClient.connect(canInstall: canInstall) { [weak self] in
             Task { @MainActor in await self?.helperDisconnected() }
         }
+    }
+
+    /// The helper, connected to again first when reconnecting right after losing it failed.
+    private func connectedHelper(canInstall: Bool) async throws -> HelperClient {
+        if helper == nil && !isReconnecting {
+            let reconnection = reconnection ?? Task {
+                defer { self.reconnection = nil }
+                try await connectHelper(canInstall: canInstall)
+                restoreActiveTunnels()
+            }
+            self.reconnection = reconnection
+            try await reconnection.value
+        }
+        guard let helper else { throw HelperError.disconnected }
+        return helper
     }
 
     /// The helper stops the tunnels of a lost connection, so mark them inactive,
