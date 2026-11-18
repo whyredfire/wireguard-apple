@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,23 @@ func TestSplitDNSKeepsForeignResolverFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(own); !os.IsNotExist(err) {
 		t.Errorf("resolver file after closing: %v, want it removed", err)
+	}
+}
+
+func TestGlobalDNSSearchOrder(t *testing.T) {
+	for _, tc := range []struct {
+		order int
+		want  string
+	}{{0, "d.add SearchOrder # 100000\n"}, {100003, "d.add SearchOrder # 100003\n"}} {
+		var script string
+		c := NewOSConfigurator(t.Logf, "utun9")
+		c.resolverDir = t.TempDir()
+		c.runScutil = func(s string) (string, error) { script += s; return "", nil }
+		if err := c.SetDNS(OSConfig{Nameservers: []netip.Addr{netip.MustParseAddr("1.1.1.1")}, SearchOrder: tc.order}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(script, tc.want) {
+			t.Errorf("SearchOrder %d: script\n%s\nwant %q", tc.order, script, tc.want)
+		}
 	}
 }

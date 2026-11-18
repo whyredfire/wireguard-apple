@@ -317,6 +317,9 @@
 "macMenuViewLog" = "View Log";
 "macMenuExportTunnels" = "Export Tunnels to Zip…";
 "macMenuLaunchAtLogin" = "Launch at Login";
+"macToolTipMoveTunnelUp" = "Move up, to a higher priority";
+"macToolTipMoveTunnelDown" = "Move down, to a lower priority";
+"macTunnelsListToolTip" = "Drag to reorder. A tunnel gets the IPs it routes, except those a tunnel above it routes.";
 "macMenuAbout" = "About WireGuard";
 "macMenuQuit" = "Quit WireGuard";
 

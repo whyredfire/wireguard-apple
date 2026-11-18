@@ -10,6 +10,7 @@ enum TunnelStore {
     struct Tunnel: Codable {
         var config: String
         var isSplitDNSEnabled: Bool
+        var position: Int?
     }
 
     private static var query: [CFString: Any] {

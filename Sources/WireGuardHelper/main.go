@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	version    = "3"
+	version    = "8"
 	socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
 )
 
@@ -44,7 +44,8 @@ func main() {
 	}
 	bind.AddControl(netns.Control(logf))
 
-	s := &server{logf: logf, log: ring, uid: *uid, requirement: *requirement, startTunnel: startTunnel, tunnels: map[string]*tunnel{}}
+	s := &server{logf: logf, log: ring, uid: *uid, requirement: *requirement, startTunnel: startTunnel,
+		routes: newRouteTable(logf, kernelRoutes{}), tunnels: map[string]*tunnel{}}
 	if _, err := netmon.Watch(logf, s.networkChanged); err != nil {
 		log.Fatalf("watching the network: %v", err)
 	}

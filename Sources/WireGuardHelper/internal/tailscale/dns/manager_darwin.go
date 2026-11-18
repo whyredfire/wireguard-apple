@@ -21,6 +21,7 @@ type OSConfig struct {
 	Nameservers   []netip.Addr
 	SearchDomains []string
 	MatchDomains  []string
+	SearchOrder   int // 0 is 100000
 }
 
 // NewOSConfigurator creates a new OS configurator for the tunnel on ifName.
@@ -137,7 +138,11 @@ func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 func (c *darwinConfigurator) setGlobalDNS(cfg OSConfig) error {
 	var script strings.Builder
 	script.WriteString("d.init\n")
-	script.WriteString("d.add SearchOrder # 100000\n")
+	order := cfg.SearchOrder
+	if order == 0 {
+		order = 100000
+	}
+	fmt.Fprintf(&script, "d.add SearchOrder # %d\n", order)
 	script.WriteString("d.add ServerAddresses *")
 	for _, ip := range cfg.Nameservers {
 		script.WriteByte(' ')

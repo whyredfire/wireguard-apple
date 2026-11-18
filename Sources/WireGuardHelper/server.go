@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"sync"
 
 	"wireguard-helper/internal/tailscale/logger"
@@ -20,12 +21,13 @@ import (
 // the ID of its request, as the responses to requests about different tunnels
 // can come in another order than the requests.
 type request struct {
-	ID     int    `json:"id"`
-	Op     string `json:"op"`
-	Name   string `json:"name,omitempty"`
-	Config Config `json:"config,omitempty"`
-	Cursor int    `json:"cursor,omitempty"`
-	LogID  int64  `json:"logID,omitempty"`
+	ID     int      `json:"id"`
+	Op     string   `json:"op"`
+	Name   string   `json:"name,omitempty"`
+	Config Config   `json:"config,omitempty"`
+	Cursor int      `json:"cursor,omitempty"`
+	LogID  int64    `json:"logID,omitempty"`
+	Names  []string `json:"names,omitempty"` // the app's list of tunnels, for the order op
 }
 
 type response struct {
@@ -45,8 +47,10 @@ type server struct {
 	uid         int
 	requirement string
 	startTunnel func(logger.Logf, Config) (*tunnel, error)
+	routes      *routeTable
 	mu          sync.Mutex
 	tunnels     map[string]*tunnel // nil while a tunnel is starting
+	dnsMu       sync.Mutex         // taken before mu
 }
 
 func (s *server) serve(path string) error {
@@ -107,8 +111,11 @@ func (s *server) serveClient(conn io.ReadWriter) {
 		var req request
 		err := json.Unmarshal(scanner.Bytes(), &req)
 		name := req.Name
-		if req.Op == "up" {
+		switch req.Op {
+		case "up":
 			name = req.Config.Name
+		case "order":
+			name = "\x00order"
 		}
 		previous, done := latest[name], make(chan struct{})
 		latest[name] = done
@@ -159,6 +166,8 @@ func (s *server) do(req request, resp *response, started *sync.Map) error {
 			return err
 		}
 		resp.Runtime = config
+	case "order":
+		s.setOrder(req.Names)
 	case "log":
 		resp.Log, resp.Cursor = s.log.since(req.LogID, req.Cursor)
 		resp.LogID = s.log.id
@@ -180,23 +189,82 @@ func (s *server) start(cfg Config) (string, error) {
 	s.mu.Unlock()
 
 	t, err := s.startTunnel(s.logf, cfg)
+	if err == nil {
+		if err = s.routes.claim(cfg.Name, t.ifName, routes(cfg.Peers), t.addresses()); err != nil {
+			t.stop()
+		}
+	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		delete(s.tunnels, cfg.Name)
+		s.mu.Unlock()
 		return "", err
 	}
 	s.tunnels[cfg.Name] = t
+	s.mu.Unlock()
+
+	s.dnsMu.Lock()
+	if err = t.setDNS(s.routes.position(cfg.Name)); err == nil {
+		s.applyDNS()
+	}
+	s.dnsMu.Unlock()
+	if err != nil {
+		s.stop(cfg.Name)
+		return "", fmt.Errorf("setting DNS: %w", err)
+	}
 	return t.ifName, nil
 }
 
-func (s *server) stop(name string) {
+func (s *server) setOrder(names []string) {
+	s.routes.setOrder(names)
+	s.dnsMu.Lock()
+	defer s.dnsMu.Unlock()
+	s.applyDNS()
+}
+
+// applyDNS sets the tunnels' DNS from the last in the list to the first, so
+// that the first one's split DNS files win. Called with dnsMu held.
+func (s *server) applyDNS() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t := s.tunnels[name]; t != nil {
-		t.stop()
-		delete(s.tunnels, name)
+	var tunnels []*tunnel
+	for _, t := range s.tunnels {
+		if t != nil && t.dns != nil {
+			tunnels = append(tunnels, t)
+		}
+	}
+	s.mu.Unlock()
+	slices.SortFunc(tunnels, func(a, b *tunnel) int {
+		switch {
+		case a.cfg.Name == b.cfg.Name:
+			return 0
+		case s.routes.before(a.cfg.Name, b.cfg.Name):
+			return 1
+		}
+		return -1
+	})
+	for _, t := range tunnels {
+		if err := t.setDNS(s.routes.position(t.cfg.Name)); err != nil {
+			t.logf("setting DNS: %v", err)
+		}
+	}
+}
+
+func (s *server) stop(name string) {
+	s.dnsMu.Lock()
+	defer s.dnsMu.Unlock()
+	s.mu.Lock()
+	t := s.tunnels[name]
+	if t == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.routes.release(name)
+	t.stop()
+	delete(s.tunnels, name)
+	s.mu.Unlock()
+	if len(t.dnsConfig.MatchDomains) > 0 {
+		s.applyDNS()
 	}
 }
 

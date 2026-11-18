@@ -30,6 +30,8 @@ class TunnelsManager {
     private var isReconnecting = false
     private var reconnection: Task<Void, Error>?
     private var restoration: Task<Void, Never>?
+    private var orderUpdate: Task<Void, Never>?
+    private var isAddingMultiple = false
 
     private init(tunnels: [TunnelContainer], unreadableTunnels: [String: TunnelStore.Tunnel]) {
         self.tunnels = tunnels
@@ -46,14 +48,19 @@ class TunnelsManager {
             return
         }
         var unreadableTunnels = [String: TunnelStore.Tunnel]()
+        var positions = [String: Int]()
         let tunnels = stored.compactMap { name, tunnel -> TunnelContainer? in
             guard let configuration = try? TunnelConfiguration(fromWgQuickConfig: tunnel.config, called: name) else {
                 wg_log(.error, message: "Leaving out tunnel '\(name)' with an unreadable configuration")
                 unreadableTunnels[name] = tunnel
                 return nil
             }
+            positions[name] = tunnel.position
             return TunnelContainer(configuration: configuration, isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
-        }.sorted { tunnelNameIsLessThan($0.name, $1.name) }
+        }.sorted { lhs, rhs in
+            let lhsPosition = positions[lhs.name] ?? .max, rhsPosition = positions[rhs.name] ?? .max
+            return lhsPosition != rhsPosition ? lhsPosition < rhsPosition : tunnelNameIsLessThan(lhs.name, rhs.name)
+        }
 
         let manager = TunnelsManager(tunnels: tunnels, unreadableTunnels: unreadableTunnels)
         Task {
@@ -80,23 +87,25 @@ class TunnelsManager {
 
         let tunnel = TunnelContainer(configuration: tunnelConfiguration, isSplitDNSEnabled: isSplitDNSEnabled)
         tunnel.manager = self
-        let previousTunnels = tunnels
         tunnels.append(tunnel)
-        tunnels.sort { TunnelsManager.tunnelNameIsLessThan($0.name, $1.name) }
         do {
             try save()
         } catch {
-            tunnels = previousTunnels
+            tunnels.removeLast()
             completionHandler(.failure(.systemErrorOnAddTunnel(systemError: error)))
             return
         }
-        tunnelsListDelegate?.tunnelAdded(at: tunnels.firstIndex(of: tunnel)!)
+        if !isAddingMultiple {
+            sendOrder()
+        }
+        tunnelsListDelegate?.tunnelAdded(at: tunnels.count - 1)
         completionHandler(.success(tunnel))
     }
 
     func addMultiple(tunnelConfigurations: [TunnelConfiguration], completionHandler: @escaping (UInt, TunnelsManagerError?) -> Void) {
         var numberSuccessful: UInt = 0
         var lastError: TunnelsManagerError?
+        isAddingMultiple = true
         for tunnelConfiguration in tunnelConfigurations {
             add(tunnelConfiguration: tunnelConfiguration) { result in
                 switch result {
@@ -104,6 +113,10 @@ class TunnelsManager {
                 case .failure(let error): lastError = error
                 }
             }
+        }
+        isAddingMultiple = false
+        if numberSuccessful > 0 {
+            sendOrder()
         }
         completionHandler(numberSuccessful, lastError)
     }
@@ -139,11 +152,6 @@ class TunnelsManager {
             activeTunnelNames.insert(tunnelName)
         }
 
-        if tunnelName != oldName {
-            let oldIndex = tunnels.firstIndex(of: tunnel)!
-            tunnels.sort { TunnelsManager.tunnelNameIsLessThan($0.name, $1.name) }
-            tunnelsListDelegate?.tunnelMoved(from: oldIndex, to: tunnels.firstIndex(of: tunnel)!)
-        }
         tunnelsListDelegate?.tunnelModified(at: tunnels.firstIndex(of: tunnel)!)
 
         let isChanged = tunnelName != oldName || tunnelConfiguration != oldConfiguration || tunnel.isSplitDNSEnabled != oldSplitDNS
@@ -152,11 +160,17 @@ class TunnelsManager {
             tunnel.status = .restarting
             Task {
                 _ = try? await helper?.request("down", name: oldName)
+                // Only now, so the tunnel keeps its priority while it restarts.
+                if tunnelName != oldName {
+                    await sendOrder().value
+                }
                 // Unless it was turned off, or went down with the helper's connection, in the meantime.
                 guard tunnel.status == .restarting else { return }
                 tunnel.status = .inactive
                 startActivation(of: tunnel)
             }
+        } else if tunnelName != oldName {
+            sendOrder()
         }
         completionHandler(nil)
     }
@@ -187,6 +201,59 @@ class TunnelsManager {
             }
         }
         completionHandler(lastError)
+    }
+
+    /// Moves the tunnels to before `row`, as when dropped in the list.
+    func moveTunnels(at indices: IndexSet, to row: Int) -> TunnelsManagerError? {
+        var moves = [(from: Int, to: Int)]()
+        var movedFromAbove = 0, movedFromBelow = 0
+        for index in indices {
+            if index < row {
+                moves.append((index - movedFromAbove, row - 1))
+                movedFromAbove += 1
+            } else {
+                moves.append((index, row + movedFromBelow))
+                movedFromBelow += 1
+            }
+        }
+        return apply(moves)
+    }
+
+    /// Moves each tunnel up (-1) or down (1) a place, unless another of them takes it.
+    func moveTunnels(at indices: IndexSet, by offset: Int) -> TunnelsManagerError? {
+        var taken = Set(indices)
+        var moves = [(from: Int, to: Int)]()
+        for index in offset < 0 ? Array(indices) : indices.reversed() {
+            let target = index + offset
+            guard tunnels.indices.contains(target) && !taken.contains(target) else { continue }
+            moves.append((index, target))
+            taken.remove(index)
+            taken.insert(target)
+        }
+        return apply(moves)
+    }
+
+    func canMoveTunnels(at indices: IndexSet, by offset: Int) -> Bool {
+        indices.contains { tunnels.indices.contains($0 + offset) && !indices.contains($0 + offset) }
+    }
+
+    private func apply(_ moves: [(from: Int, to: Int)]) -> TunnelsManagerError? {
+        let moves = moves.filter { $0.from != $0.to }
+        guard !moves.isEmpty else { return nil }
+
+        let move = { (from: Int, to: Int) in
+            self.tunnels.insert(self.tunnels.remove(at: from), at: to)
+            self.tunnelsListDelegate?.tunnelMoved(from: from, to: to)
+        }
+        moves.forEach(move)
+        do {
+            try save()
+        } catch {
+            moves.reversed().forEach { move($0.to, $0.from) }
+            return .systemErrorOnModifyTunnel(systemError: error)
+        }
+        sendOrder()
+        return nil
     }
 
     func numberOfTunnels() -> Int {
@@ -313,9 +380,18 @@ class TunnelsManager {
     private func save() throws {
         // The unreadable tunnels stay stored, unless a tunnel took their name.
         var stored = unreadableTunnels
-        for tunnel in tunnels {
+        for (position, tunnel) in tunnels.enumerated() {
             guard let configuration = tunnel.tunnelConfiguration else { continue }
-            stored[tunnel.name] = TunnelStore.Tunnel(config: configuration.asWgQuickConfig(), isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
+            stored[tunnel.name] = TunnelStore.Tunnel(config: configuration.asWgQuickConfig(), isSplitDNSEnabled: tunnel.isSplitDNSEnabled,
+                                                     position: position)
+        }
+        // The unreadable tunnels go after the others.
+        let unreadable = unreadableTunnels.filter { name, _ in !tunnels.contains { $0.name == name } }.sorted { lhs, rhs in
+            let lhsPosition = lhs.value.position ?? .max, rhsPosition = rhs.value.position ?? .max
+            return lhsPosition != rhsPosition ? lhsPosition < rhsPosition : TunnelsManager.tunnelNameIsLessThan(lhs.key, rhs.key)
+        }
+        for (offset, name) in unreadable.map(\.key).enumerated() {
+            stored[name]?.position = tunnels.count + offset
         }
         try TunnelStore.save(stored)
         unreadableTunnels = unreadableTunnels.filter { name, _ in !tunnels.contains { $0.name == name } }
@@ -325,6 +401,20 @@ class TunnelsManager {
         helper = try await HelperClient.connect(canInstall: canInstall) { [weak self] in
             Task { @MainActor in await self?.helperDisconnected() }
         }
+        await sendOrder().value
+    }
+
+    /// Sends the tunnels' order, their priority, to the helper, after any update still going.
+    @discardableResult
+    private func sendOrder() -> Task<Void, Never> {
+        let names = tunnels.map(\.name)
+        let previous = orderUpdate
+        let update = Task {
+            await previous?.value
+            _ = try? await helper?.request("order", names: names)
+        }
+        orderUpdate = update
+        return update
     }
 
     /// The helper, connected to again first when reconnecting right after losing it failed.

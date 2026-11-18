@@ -5,9 +5,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"net/netip"
+	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,9 +48,15 @@ type tunnel struct {
 	cfg       Config
 	logf      logger.Logf
 	ifName    string
+	linkLocal netip.Prefix
 	dev       *device.Device
 	router    interface{ Close() error }
-	dns       interface{ Close() error }
+	dns       interface {
+		Close() error
+		SetDNS(dns.OSConfig) error
+	}
+	dnsConfig dns.OSConfig
+	dnsSet    bool
 	endpoints []netip.AddrPort
 }
 
@@ -94,24 +103,43 @@ func startTunnel(logf logger.Logf, cfg Config) (t *tunnel, err error) {
 	if err := r.Up(); err != nil {
 		return nil, err
 	}
-	if err := r.Set(&router.Config{LocalAddrs: cfg.Addresses, Routes: routes(cfg.Peers)}); err != nil {
-		return nil, fmt.Errorf("setting the routes: %w", err)
+	if err := r.Set(&router.Config{LocalAddrs: cfg.Addresses}); err != nil {
+		return nil, fmt.Errorf("setting the addresses: %w", err)
+	}
+	// The kernel doesn't route IPv6 into an interface without an IPv6 address.
+	if needsLinkLocal(cfg) {
+		t.linkLocal = randomLinkLocal()
+		if err := addLinkLocal(ifName, t.linkLocal); err != nil {
+			return nil, fmt.Errorf("adding a link-local IPv6 address: %w", err)
+		}
 	}
 
 	if len(cfg.DNS) > 0 {
-		d := dns.NewOSConfigurator(logf, ifName)
-		t.dns = d
-		osCfg := dns.OSConfig{Nameservers: cfg.DNS, SearchDomains: cfg.DNSSearch}
+		t.dns = dns.NewOSConfigurator(logf, ifName)
+		t.dnsConfig = dns.OSConfig{Nameservers: cfg.DNS, SearchDomains: cfg.DNSSearch}
 		if cfg.SplitDNS {
-			osCfg.MatchDomains = cfg.DNSSearch
-		}
-		if err := d.SetDNS(osCfg); err != nil {
-			return nil, fmt.Errorf("setting DNS: %w", err)
+			t.dnsConfig.MatchDomains = cfg.DNSSearch
 		}
 	}
 
 	logf("started on %s", ifName)
 	return t, nil
+}
+
+func (t *tunnel) setDNS(position int) error {
+	if t.dns == nil {
+		return nil
+	}
+	order := 100000 + min(position, 9999)
+	if t.dnsSet && len(t.dnsConfig.MatchDomains) == 0 && t.dnsConfig.SearchOrder == order {
+		return nil
+	}
+	t.dnsConfig.SearchOrder = order
+	if err := t.dns.SetDNS(t.dnsConfig); err != nil {
+		return err
+	}
+	t.dnsSet = true
+	return nil
 }
 
 func (t *tunnel) stop() {
@@ -147,6 +175,34 @@ func (t *tunnel) networkChanged() {
 	}
 }
 
+func (t *tunnel) addresses() []netip.Prefix {
+	if t.linkLocal.IsValid() {
+		return append(slices.Clip(t.cfg.Addresses), t.linkLocal)
+	}
+	return t.cfg.Addresses
+}
+
+func needsLinkLocal(cfg Config) bool {
+	is6 := func(p netip.Prefix) bool { return p.Addr().Is6() && !p.Addr().Is4In6() }
+	kernel, _ := kernelPrefixes(routes(cfg.Peers))
+	return !slices.ContainsFunc(cfg.Addresses, is6) && slices.ContainsFunc(kernel, is6)
+}
+
+func randomLinkLocal() netip.Prefix {
+	var b [16]byte
+	b[0], b[1] = 0xfe, 0x80
+	rand.Read(b[8:])
+	return netip.PrefixFrom(netip.AddrFrom16(b), 64)
+}
+
+func addLinkLocal(ifName string, p netip.Prefix) error {
+	out, err := exec.Command("ifconfig", ifName, "inet6", p.Addr().String()+"%"+ifName, "prefixlen", "64").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func uapiConfig(cfg Config, endpoints []netip.AddrPort) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "private_key=%s\n", cfg.PrivateKey)
@@ -171,22 +227,10 @@ func uapiConfig(cfg Config, endpoints []netip.AddrPort) string {
 	return b.String()
 }
 
-// routes returns the routes into the tunnel for the peers' allowed IPs. A
-// default route is split in two halves, which take precedence over the
-// system's default route without replacing it.
 func routes(peers []PeerConfig) []netip.Prefix {
 	var routes []netip.Prefix
 	for _, peer := range peers {
-		for _, ip := range peer.AllowedIPs {
-			switch ip.Masked() {
-			case netip.MustParsePrefix("0.0.0.0/0"):
-				routes = append(routes, netip.MustParsePrefix("0.0.0.0/1"), netip.MustParsePrefix("128.0.0.0/1"))
-			case netip.MustParsePrefix("::/0"):
-				routes = append(routes, netip.MustParsePrefix("::/1"), netip.MustParsePrefix("8000::/1"))
-			default:
-				routes = append(routes, ip.Masked())
-			}
-		}
+		routes = append(routes, peer.AllowedIPs...)
 	}
 	return routes
 }

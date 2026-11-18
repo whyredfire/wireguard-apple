@@ -13,15 +13,31 @@ import (
 func TestRoutes(t *testing.T) {
 	peers := []PeerConfig{
 		{AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}},
-		{AllowedIPs: []netip.Prefix{netip.MustParsePrefix("10.0.0.7/24")}},
+		{AllowedIPs: []netip.Prefix{netip.MustParsePrefix("10.0.0.7/24"), netip.MustParsePrefix("10.0.0.0/24")}},
 	}
-	want := []netip.Prefix{
-		netip.MustParsePrefix("0.0.0.0/1"), netip.MustParsePrefix("128.0.0.0/1"),
-		netip.MustParsePrefix("::/1"), netip.MustParsePrefix("8000::/1"),
-		netip.MustParsePrefix("10.0.0.0/24"),
-	}
+	want := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+		netip.MustParsePrefix("10.0.0.7/24"), netip.MustParsePrefix("10.0.0.0/24")}
 	if got := routes(peers); !reflect.DeepEqual(got, want) {
 		t.Errorf("routes = %v, want %v", got, want)
+	}
+}
+
+func TestNeedsLinkLocal(t *testing.T) {
+	v4 := []netip.Prefix{netip.MustParsePrefix("10.9.0.2/32")}
+	v46 := append(v4, netip.MustParsePrefix("fd00::2/128"))
+	all := []PeerConfig{{AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}}}
+	only4 := []PeerConfig{{AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}}
+	for _, tc := range []struct {
+		addrs []netip.Prefix
+		peers []PeerConfig
+		want  bool
+	}{{v4, all, true}, {v46, all, false}, {v4, only4, false}} {
+		if got := needsLinkLocal(Config{Addresses: tc.addrs, Peers: tc.peers}); got != tc.want {
+			t.Errorf("needsLinkLocal(%v, %v) = %v, want %v", tc.addrs, tc.peers[0].AllowedIPs, got, tc.want)
+		}
+	}
+	if p := randomLinkLocal(); !p.Addr().IsLinkLocalUnicast() || p.Bits() != 64 || p == randomLinkLocal() {
+		t.Errorf("randomLinkLocal = %v", p)
 	}
 }
 

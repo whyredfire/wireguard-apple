@@ -7,7 +7,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net"
+	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"golang.zx2c4.com/wireguard/tun/tuntest"
 
 	"wireguard-helper/internal/bind"
+	"wireguard-helper/internal/tailscale/dns"
 	"wireguard-helper/internal/tailscale/logger"
 )
 
@@ -27,12 +31,58 @@ type testClient struct {
 	responses *bufio.Scanner
 	release   chan struct{}
 	served    chan struct{}
+	dns       *fakeDNS
+}
+
+type fakeDNS struct {
+	mu     sync.Mutex
+	orders map[string]int
+	owners map[string]string
+}
+
+type fakeTunnelDNS struct {
+	f    *fakeDNS
+	name string
+}
+
+func (f *fakeDNS) forTunnel(name string) fakeTunnelDNS { return fakeTunnelDNS{f, name} }
+
+func (d fakeTunnelDNS) SetDNS(cfg dns.OSConfig) error {
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	if len(cfg.MatchDomains) == 0 {
+		d.f.orders[d.name] = cfg.SearchOrder
+	}
+	for _, domain := range cfg.MatchDomains {
+		d.f.owners[domain] = d.name
+	}
+	return nil
+}
+
+func (d fakeTunnelDNS) Close() error {
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	delete(d.f.orders, d.name)
+	maps.DeleteFunc(d.f.owners, func(_, owner string) bool { return owner == d.name })
+	return nil
+}
+
+func (f *fakeDNS) owner(domain string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.owners[domain]
+}
+
+func (f *fakeDNS) snapshot() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return maps.Clone(f.orders)
 }
 
 func newTestClient(t *testing.T) *testClient {
-	c := &testClient{t: t, release: make(chan struct{}), served: make(chan struct{})}
+	c := &testClient{t: t, release: make(chan struct{}), served: make(chan struct{}), dns: &fakeDNS{orders: map[string]int{}, owners: map[string]string{}}}
 	logf := func(string, ...any) {}
-	c.server = &server{logf: logf, log: newRingLog(), tunnels: map[string]*tunnel{}}
+	c.server = &server{logf: logf, log: newRingLog(), routes: newRouteTable(logf, newFakeRoutes()), tunnels: map[string]*tunnel{}}
 	c.server.startTunnel = func(_ logger.Logf, cfg Config) (*tunnel, error) {
 		switch cfg.Name {
 		case "slow":
@@ -41,7 +91,15 @@ func newTestClient(t *testing.T) *testClient {
 			return nil, errors.New("broken")
 		}
 		dev := device.NewDevice(tuntest.NewChannelTUN().TUN(), bind.NewStdNetBind(), &device.Logger{Verbosef: logf, Errorf: logf})
-		return &tunnel{cfg: cfg, logf: logf, ifName: "test-" + cfg.Name, dev: dev}, nil
+		t := &tunnel{cfg: cfg, logf: logf, ifName: "test-" + cfg.Name, dev: dev}
+		if len(cfg.DNS) > 0 {
+			t.dns = c.dns.forTunnel(cfg.Name)
+			t.dnsConfig = dns.OSConfig{Nameservers: cfg.DNS}
+			if cfg.SplitDNS {
+				t.dnsConfig.MatchDomains = cfg.DNSSearch
+			}
+		}
+		return t, nil
 	}
 	var serverConn net.Conn
 	c.conn, serverConn = net.Pipe()
@@ -118,6 +176,89 @@ func TestServeClient(t *testing.T) {
 	if resp := c.receive(); resp.ID != 6 || len(resp.Log) != 0 || resp.Cursor != 1 {
 		t.Errorf("log with the current cursor = %+v", resp)
 	}
+}
+
+func TestServeClientDNSOrder(t *testing.T) {
+	c := newTestClient(t)
+	servers := []netip.Addr{netip.MustParseAddr("192.0.2.53")}
+	c.send(request{ID: 1, Op: "order", Names: []string{"top", "fast", "other"}})
+	c.receive()
+	for id, name := range []string{"fast", "other"} {
+		c.send(request{ID: 2 + id, Op: "up", Config: Config{Name: name, DNS: servers}})
+		if resp := c.receive(); resp.Error != "" {
+			t.Fatalf("up %s = %+v", name, resp)
+		}
+	}
+	if got, want := c.dns.snapshot(), map[string]int{"fast": 100001, "other": 100002}; !maps.Equal(got, want) {
+		t.Errorf("DNS orders = %v, want %v", got, want)
+	}
+	c.send(request{ID: 4, Op: "order", Names: []string{"other", "fast"}})
+	c.receive()
+	if got, want := c.dns.snapshot(), map[string]int{"fast": 100001, "other": 100000}; !maps.Equal(got, want) {
+		t.Errorf("DNS orders after reordering = %v, want %v", got, want)
+	}
+	c.send(request{ID: 5, Op: "down", Name: "other"})
+	c.receive()
+	c.send(request{ID: 6, Op: "order", Names: []string{"fast", "other"}})
+	c.receive()
+	if got, want := c.dns.snapshot(), map[string]int{"fast": 100000}; !maps.Equal(got, want) {
+		t.Errorf("DNS orders after stopping one = %v, want %v", got, want)
+	}
+}
+
+func TestServeClientSplitDNSOrder(t *testing.T) {
+	c := newTestClient(t)
+	cfg := func(name string) Config {
+		return Config{Name: name, DNS: []netip.Addr{netip.MustParseAddr("192.0.2.53")}, DNSSearch: []string{"corp.example"}, SplitDNS: true}
+	}
+	c.send(request{ID: 1, Op: "order", Names: []string{"fast", "other"}})
+	c.receive()
+	c.send(request{ID: 2, Op: "up", Config: cfg("fast")})
+	c.receive()
+	c.send(request{ID: 3, Op: "up", Config: cfg("other")})
+	c.receive()
+	if got := c.dns.owner("corp.example"); got != "fast" {
+		t.Errorf("owner after the lower tunnel started = %q, want fast", got)
+	}
+	c.send(request{ID: 4, Op: "order", Names: []string{"other", "fast"}})
+	c.receive()
+	if got := c.dns.owner("corp.example"); got != "other" {
+		t.Errorf("owner after reordering = %q, want other", got)
+	}
+	c.send(request{ID: 5, Op: "down", Name: "other"})
+	c.receive()
+	if got := c.dns.owner("corp.example"); got != "fast" {
+		t.Errorf("owner after the first tunnel stopped = %q, want fast", got)
+	}
+}
+
+func TestServeClientRoutes(t *testing.T) {
+	c := newTestClient(t)
+	f := c.server.routes.sys.(*fakeRoutes)
+	peers := []PeerConfig{{AllowedIPs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}}}
+	lan := netip.MustParsePrefix("10.0.0.0/24")
+
+	c.send(request{ID: 1, Op: "order", Names: []string{"fast", "other"}})
+	c.receive()
+	for id, name := range []string{"other", "fast"} {
+		c.send(request{ID: 2 + id, Op: "up", Config: Config{Name: name, Peers: peers}})
+		if resp := c.receive(); resp.Error != "" {
+			t.Fatalf("up %s = %+v", name, resp)
+		}
+	}
+	checkKernel(t, f, map[netip.Prefix]string{lan: "test-fast"})
+
+	c.send(request{ID: 4, Op: "order", Names: []string{"other", "fast"}})
+	c.receive()
+	checkKernel(t, f, map[netip.Prefix]string{lan: "test-other"})
+
+	c.send(request{ID: 5, Op: "down", Name: "other"})
+	c.receive()
+	checkKernel(t, f, map[netip.Prefix]string{lan: "test-fast"})
+
+	c.conn.Close()
+	<-c.served
+	checkKernel(t, f, map[netip.Prefix]string{})
 }
 
 // A tunnel that takes long to start must not hold up requests about other

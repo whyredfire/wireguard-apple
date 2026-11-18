@@ -24,7 +24,7 @@ enum HelperError: LocalizedError {
 /// helper answers requests about different tunnels in any order.
 actor HelperClient {
     static let socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
-    static let version = "3"
+    static let version = "8"
 
     struct Response: Decodable, Sendable {
         var id: Int?
@@ -135,11 +135,13 @@ actor HelperClient {
     }
 
     @discardableResult
-    func request(_ op: String, name: String? = nil, config: HelperTunnelConfig? = nil, logCursor: LogCursor? = nil) async throws -> Response {
+    func request(_ op: String, name: String? = nil, names: [String]? = nil, config: HelperTunnelConfig? = nil,
+                 logCursor: LogCursor? = nil) async throws -> Response {
         struct Request: Encodable {
             var id: Int
             var op: String
             var name: String?
+            var names: [String]?
             var config: HelperTunnelConfig?
             var cursor: Int?
             var logID: Int64?
@@ -147,7 +149,7 @@ actor HelperClient {
         guard isConnected else { throw HelperError.disconnected }
         lastRequestID += 1
         let id = lastRequestID
-        var line = try JSONEncoder().encode(Request(id: id, op: op, name: name, config: config, cursor: logCursor?.position, logID: logCursor?.logID))
+        var line = try JSONEncoder().encode(Request(id: id, op: op, name: name, names: names, config: config, cursor: logCursor?.position, logID: logCursor?.logID))
         line.append(UInt8(ascii: "\n"))
         let response = try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation

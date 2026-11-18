@@ -15,6 +15,7 @@ class TunnelsListTableViewController: NSViewController {
     let tunnelsManager: TunnelsManager
     weak var delegate: TunnelsListTableViewControllerDelegate?
     var isRemovingTunnelsFromWithinTheApp = false
+    private var draggedRows: IndexSet?
 
     let tableView: NSTableView = {
         let tableView = NSTableView()
@@ -35,6 +36,16 @@ class TunnelsListTableViewController: NSViewController {
         button.isBordered = false
         return button
     }()
+
+    let moveUpButton = barButton(symbol: "chevron.up", toolTip: tr("macToolTipMoveTunnelUp"), action: #selector(handleMoveUpAction))
+    let moveDownButton = barButton(symbol: "chevron.down", toolTip: tr("macToolTipMoveTunnelDown"), action: #selector(handleMoveDownAction))
+
+    private static func barButton(symbol: String, toolTip: String, action: Selector) -> NSButton {
+        let button = NSButton(image: barSymbol(symbol), target: nil, action: action)
+        button.isBordered = false
+        button.toolTip = toolTip
+        return button
+    }
 
     private static func barSymbol(_ name: String) -> NSImage {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)!
@@ -70,6 +81,10 @@ class TunnelsListTableViewController: NSViewController {
         tableView.delegate = self
 
         tableView.doubleAction = #selector(listDoubleClicked(sender:))
+        tableView.toolTip = tr("macTunnelsListToolTip")
+        tableView.registerForDraggedTypes([.tunnelRow])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
+        tableView.draggingDestinationFeedbackStyle = .gap
 
         let isSelected = selectTunnelInOperation() || selectTunnel(at: 0)
         if !isSelected {
@@ -95,9 +110,10 @@ class TunnelsListTableViewController: NSViewController {
         let separator = NSBox()
         separator.boxType = .separator
 
-        let buttonBar = NSStackView(views: [addButton, removeButton])
+        let buttonBar = NSStackView(views: [addButton, removeButton, moveUpButton, moveDownButton])
         buttonBar.spacing = 2
-        for button in [addButton, removeButton] {
+        buttonBar.setCustomSpacing(10, after: removeButton)
+        for button in [addButton, removeButton, moveUpButton, moveDownButton] {
             button.widthAnchor.constraint(equalToConstant: 26).isActive = true
             button.heightAnchor.constraint(equalToConstant: 22).isActive = true
         }
@@ -132,6 +148,9 @@ class TunnelsListTableViewController: NSViewController {
 
         addButton.menu?.items.forEach { $0.target = self }
         removeButton.target = self
+        moveUpButton.target = self
+        moveDownButton.target = self
+        updateMoveButtons()
 
         view = containerView
     }
@@ -192,6 +211,28 @@ class TunnelsListTableViewController: NSViewController {
              }
         }
         alert.beginSheetModal(for: window)
+    }
+
+    @objc func handleMoveUpAction() {
+        moveSelectedTunnels(by: -1)
+    }
+
+    @objc func handleMoveDownAction() {
+        moveSelectedTunnels(by: 1)
+    }
+
+    private func moveSelectedTunnels(by offset: Int) {
+        if let error = tunnelsManager.moveTunnels(at: tableView.selectedRowIndexes, by: offset) {
+            ErrorPresenter.showErrorAlert(error: error, from: self)
+        }
+        tableView.scrollRowToVisible(tableView.selectedRow)
+        updateMoveButtons()
+    }
+
+    private func updateMoveButtons() {
+        let selected = tableView.selectedRowIndexes
+        moveUpButton.isEnabled = tunnelsManager.canMoveTunnels(at: selected, by: -1)
+        moveDownButton.isEnabled = tunnelsManager.canMoveTunnels(at: selected, by: 1)
     }
 
     @objc func handleViewLogAction() {
@@ -281,6 +322,7 @@ extension TunnelsListTableViewController {
         if tunnelsManager.numberOfTunnels() == 1 {
             selectTunnel(at: 0)
         }
+        updateMoveButtons()
         if !NSApp.isActive {
             // macOS's VPN prompt might have caused us to lose focus
             NSApp.activate()
@@ -293,6 +335,7 @@ extension TunnelsListTableViewController {
 
     func tunnelMoved(from oldIndex: Int, to newIndex: Int) {
         tableView.moveRow(at: oldIndex, to: newIndex)
+        updateMoveButtons()
     }
 
     func tunnelRemoved(at index: Int) {
@@ -305,6 +348,7 @@ extension TunnelsListTableViewController {
             let newSelection = min(index, tunnelsManager.numberOfTunnels() - 1)
             tableView.selectRowIndexes(IndexSet(integer: newSelection), byExtendingSelection: false)
         }
+        updateMoveButtons()
     }
 }
 
@@ -312,6 +356,42 @@ extension TunnelsListTableViewController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
         return tunnelsManager.numberOfTunnels()
     }
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        let item = NSPasteboardItem()
+        item.setString(String(row), forType: .tunnelRow)
+        return item
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+        draggedRows = rowIndexes
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        draggedRows = nil
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int,
+                   proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        guard draggedRows != nil, info.draggingSource as? NSTableView === tableView else { return [] }
+        if dropOperation == .on {
+            tableView.setDropRow(row, dropOperation: .above)
+        }
+        return .move
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let rows = draggedRows else { return false }
+        if let error = tunnelsManager.moveTunnels(at: rows, to: row) {
+            ErrorPresenter.showErrorAlert(error: error, from: self)
+            return false
+        }
+        return true
+    }
+}
+
+private extension NSPasteboard.PasteboardType {
+    static let tunnelRow = NSPasteboard.PasteboardType(Bundle.main.bundleIdentifier! + ".tunnel-row")
 }
 
 extension TunnelsListTableViewController: NSTableViewDelegate {
@@ -322,6 +402,7 @@ extension TunnelsListTableViewController: NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        updateMoveButtons()
         let selectedTunnelIndices = tableView.selectedRowIndexes.sorted()
         if !selectedTunnelIndices.isEmpty {
             delegate?.tunnelsSelected(tunnelIndices: tableView.selectedRowIndexes.sorted())
