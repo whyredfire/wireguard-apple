@@ -20,7 +20,6 @@ import (
 	"wireguard-helper/internal/bind"
 	"wireguard-helper/internal/tailscale/dns"
 	"wireguard-helper/internal/tailscale/logger"
-	"wireguard-helper/internal/tailscale/router"
 )
 
 // Config is a tunnel's configuration as sent by the app. Keys are hex encoded.
@@ -50,7 +49,6 @@ type tunnel struct {
 	ifName    string
 	linkLocal netip.Prefix
 	dev       *device.Device
-	router    interface{ Close() error }
 	dns       interface {
 		Close() error
 		SetDNS(dns.OSConfig) error
@@ -95,16 +93,17 @@ func startTunnel(logf logger.Logf, cfg Config) (t *tunnel, err error) {
 		return nil, err
 	}
 
-	r, err := router.New(logf, tunDev)
-	if err != nil {
+	if err := ifconfig(ifName, "up"); err != nil {
 		return nil, err
 	}
-	t.router = r
-	if err := r.Up(); err != nil {
-		return nil, err
-	}
-	if err := r.Set(&router.Config{LocalAddrs: cfg.Addresses}); err != nil {
-		return nil, fmt.Errorf("setting the addresses: %w", err)
+	for _, addr := range cfg.Addresses {
+		family := "inet"
+		if addr.Addr().Is6() {
+			family = "inet6"
+		}
+		if err := ifconfig(ifName, family, addr.String(), addr.Addr().String()); err != nil {
+			return nil, fmt.Errorf("setting the addresses: %w", err)
+		}
 	}
 	// The kernel doesn't route IPv6 into an interface without an IPv6 address.
 	if needsLinkLocal(cfg) {
@@ -150,9 +149,6 @@ func (t *tunnel) stop() {
 	}
 	// Closing the device destroys the interface, and with it its routes.
 	t.dev.Close()
-	if t.router != nil {
-		t.router.Close()
-	}
 	t.logf("stopped")
 }
 
@@ -196,9 +192,13 @@ func randomLinkLocal() netip.Prefix {
 }
 
 func addLinkLocal(ifName string, p netip.Prefix) error {
-	out, err := exec.Command("ifconfig", ifName, "inet6", p.Addr().String()+"%"+ifName, "prefixlen", "64").CombinedOutput()
+	return ifconfig(ifName, "inet6", p.Addr().String()+"%"+ifName, "prefixlen", "64")
+}
+
+func ifconfig(args ...string) error {
+	out, err := exec.Command("ifconfig", args...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("ifconfig %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

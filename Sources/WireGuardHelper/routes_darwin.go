@@ -32,6 +32,7 @@ func (kernelRoutes) delete(p netip.Prefix, ifName string) error {
 }
 
 func writeRoute(typ int, p netip.Prefix, ifName string) error {
+	// shortcut: ~50µs interface lookup per route, so ~0.5s for 10,000 allowed IPs; look it up once per tunnel if lists that long matter.
 	iface, err := net.InterfaceByName(ifName)
 	if err != nil {
 		return err

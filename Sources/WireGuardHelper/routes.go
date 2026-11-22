@@ -242,8 +242,10 @@ var (
 // the kernel looks up 0.0.0.0 or :: for the default route of the tunnels'
 // interface-bound sockets, which fail if that's a tunnel's.
 func kernelPrefixes(allowed []netip.Prefix) (routes, dropped []netip.Prefix) {
+	seen := map[netip.Prefix]bool{}
 	add := func(p netip.Prefix) {
-		if !slices.Contains(routes, p) {
+		if !seen[p] {
+			seen[p] = true
 			routes = append(routes, p)
 		}
 	}

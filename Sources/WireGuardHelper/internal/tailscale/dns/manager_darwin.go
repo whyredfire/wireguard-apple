@@ -58,10 +58,6 @@ func (c *darwinConfigurator) Close() error {
 	return c.removeResolverFiles(func(domain string) bool { return true })
 }
 
-func (c *darwinConfigurator) SupportsSplitDNS() bool {
-	return true
-}
-
 func (c *darwinConfigurator) SetDNS(cfg OSConfig) error {
 	if len(cfg.Nameservers) > 0 && len(cfg.MatchDomains) == 0 {
 		if err := c.setGlobalDNS(cfg); err != nil {

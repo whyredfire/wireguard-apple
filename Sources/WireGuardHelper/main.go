@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	version    = "8"
+	version    = "9"
 	socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
 )
 

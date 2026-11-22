@@ -24,7 +24,7 @@ enum HelperError: LocalizedError {
 /// helper answers requests about different tunnels in any order.
 actor HelperClient {
     static let socketPath = "/var/run/dev.whyredfire.wireguard.helper.sock"
-    static let version = "8"
+    static let version = "9"
 
     struct Response: Decodable, Sendable {
         var id: Int?

@@ -57,10 +57,7 @@ class TunnelsManager {
             }
             positions[name] = tunnel.position
             return TunnelContainer(configuration: configuration, isSplitDNSEnabled: tunnel.isSplitDNSEnabled)
-        }.sorted { lhs, rhs in
-            let lhsPosition = positions[lhs.name] ?? .max, rhsPosition = positions[rhs.name] ?? .max
-            return lhsPosition != rhsPosition ? lhsPosition < rhsPosition : tunnelNameIsLessThan(lhs.name, rhs.name)
-        }
+        }.sorted { isInListOrder(($0.name, positions[$0.name]), ($1.name, positions[$1.name])) }
 
         let manager = TunnelsManager(tunnels: tunnels, unreadableTunnels: unreadableTunnels)
         Task {
@@ -203,8 +200,20 @@ class TunnelsManager {
         completionHandler(lastError)
     }
 
-    /// Moves the tunnels to before `row`, as when dropped in the list.
     func moveTunnels(at indices: IndexSet, to row: Int) -> TunnelsManagerError? {
+        apply(Self.moves(of: indices, to: row))
+    }
+
+    func moveTunnels(at indices: IndexSet, by offset: Int) -> TunnelsManagerError? {
+        apply(Self.moves(of: indices, by: offset, count: tunnels.count))
+    }
+
+    func canMoveTunnels(at indices: IndexSet, by offset: Int) -> Bool {
+        !Self.moves(of: indices, by: offset, count: tunnels.count).isEmpty
+    }
+
+    /// The moves, made one after the other, that put the rows before `row`, as when dropped in the list.
+    nonisolated static func moves(of indices: IndexSet, to row: Int) -> [(from: Int, to: Int)] {
         var moves = [(from: Int, to: Int)]()
         var movedFromAbove = 0, movedFromBelow = 0
         for index in indices {
@@ -216,29 +225,30 @@ class TunnelsManager {
                 movedFromBelow += 1
             }
         }
-        return apply(moves)
+        return moves.filter { $0.from != $0.to }
     }
 
-    /// Moves each tunnel up (-1) or down (1) a place, unless another of them takes it.
-    func moveTunnels(at indices: IndexSet, by offset: Int) -> TunnelsManagerError? {
+    /// The moves that take each row up (-1) or down (1) a place, unless another of them takes it.
+    nonisolated static func moves(of indices: IndexSet, by offset: Int, count: Int) -> [(from: Int, to: Int)] {
         var taken = Set(indices)
         var moves = [(from: Int, to: Int)]()
         for index in offset < 0 ? Array(indices) : indices.reversed() {
             let target = index + offset
-            guard tunnels.indices.contains(target) && !taken.contains(target) else { continue }
+            guard (0..<count).contains(target) && !taken.contains(target) else { continue }
             moves.append((index, target))
             taken.remove(index)
             taken.insert(target)
         }
-        return apply(moves)
+        return moves
     }
 
-    func canMoveTunnels(at indices: IndexSet, by offset: Int) -> Bool {
-        indices.contains { tunnels.indices.contains($0 + offset) && !indices.contains($0 + offset) }
+    /// The list's order: by stored position, the tunnels without one last, then by name.
+    nonisolated static func isInListOrder(_ lhs: (name: String, position: Int?), _ rhs: (name: String, position: Int?)) -> Bool {
+        let lhsPosition = lhs.position ?? .max, rhsPosition = rhs.position ?? .max
+        return lhsPosition != rhsPosition ? lhsPosition < rhsPosition : tunnelNameIsLessThan(lhs.name, rhs.name)
     }
 
     private func apply(_ moves: [(from: Int, to: Int)]) -> TunnelsManagerError? {
-        let moves = moves.filter { $0.from != $0.to }
         guard !moves.isEmpty else { return nil }
 
         let move = { (from: Int, to: Int) in
@@ -386,9 +396,8 @@ class TunnelsManager {
                                                      position: position)
         }
         // The unreadable tunnels go after the others.
-        let unreadable = unreadableTunnels.filter { name, _ in !tunnels.contains { $0.name == name } }.sorted { lhs, rhs in
-            let lhsPosition = lhs.value.position ?? .max, rhsPosition = rhs.value.position ?? .max
-            return lhsPosition != rhsPosition ? lhsPosition < rhsPosition : TunnelsManager.tunnelNameIsLessThan(lhs.key, rhs.key)
+        let unreadable = unreadableTunnels.filter { name, _ in !tunnels.contains { $0.name == name } }.sorted {
+            Self.isInListOrder(($0.key, $0.value.position), ($1.key, $1.value.position))
         }
         for (offset, name) in unreadable.map(\.key).enumerated() {
             stored[name]?.position = tunnels.count + offset

@@ -4,7 +4,9 @@
 package netmon
 
 import (
+	"cmp"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 	"sync"
@@ -166,7 +168,20 @@ func (m *darwinRouteMon) skipRouteMessage(msg *route.RouteMessage) bool {
 			return true
 		}
 	}
-	return false
+	// Routes into an interface, like the helper's own into the tunnels, name it in
+	// the gateway or by index only; one gone by now was a tunnel stopping.
+	name, index := "", msg.Index
+	if la, ok := addrType(msg.Addrs, unix.RTAX_GATEWAY).(*route.LinkAddr); ok {
+		name, index = la.Name, cmp.Or(index, la.Index)
+	}
+	if name == "" && index != 0 {
+		iface, err := net.InterfaceByIndex(index)
+		if err != nil {
+			return true
+		}
+		name = iface.Name
+	}
+	return name != "" && !isInterestingInterface(name)
 }
 
 func (m *darwinRouteMon) logMessages(msgs []route.Message) {

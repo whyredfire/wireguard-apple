@@ -46,6 +46,10 @@ let package = Package(
                 "UI/macOS/Resources",
                 "UI/macOS/Info.plist"
             ]
+        ),
+        .testTarget(
+            name: "WireGuardTests",
+            dependencies: ["WireGuard"]
         )
     ]
 )
